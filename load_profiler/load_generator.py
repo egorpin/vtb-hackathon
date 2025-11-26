@@ -1,9 +1,10 @@
 import subprocess
 import time
+import sys
 from colorama import Fore, Style
 from config import DB_CONFIG
 
-# Параметры подключения для pgbench (используем ENV, как настроено в Docker)
+# Параметры подключения для pgbench (используем ENV)
 PGBENCH_CMD_BASE = [
     "pgbench",
     "-h", DB_CONFIG['host'],
@@ -12,80 +13,130 @@ PGBENCH_CMD_BASE = [
     "-d", DB_CONFIG['dbname']
 ]
 
-# --- ШАБЛОНЫ НАГРУЗКИ ---
+# --- РЕАЛЬНЫЕ ШАБЛОНЫ НАГРУЗКИ ---
 LOAD_SCENARIOS = {
     "1": {
         "name": "Classic OLTP (Банкинг)",
-        "desc": "Быстрые, короткие транзакции (SELECT/UPDATE).",
-        "options": ["-c", "10", "-j", "2", "-T", "60", "-P", "5"] # 10 клиентов, 60 секунд, отчет каждые 5с
+        "profile": "Classic OLTP",
+        "desc": "Высокий TPS, низкая задержка. Имитация TPC-B.",
+        "options": ["-c", "30", "-j", "4", "-T", "60", "-P", "5"] # 30 клиентов, 60 секунд
     },
     "2": {
-        "name": "Write-Heavy / IoT (Вставка данных)",
-        "desc": "Преимущественно INSERT-транзакции (имитация IoT).",
-        "options": ["-c", "5", "-j", "1", "-T", "30", "-P", "5", "-M", "prepared", "-b", "insert_simple"] # 5 клиентов, 30с, использует встроенный скрипт insert_simple
+        "name": "IoT / Ingestion",
+        "profile": "IoT / Ingestion",
+        "desc": "Преимущественно INSERT-транзакции (имитация записи логов).",
+        "options": ["-c", "10", "-j", "2", "-T", "40", "-P", "5", "-b", "insert_simple"] # 10 клиентов, 40с, встроенный скрипт
     },
     "3": {
-        "name": "Heavy Read / OLAP Query (Аналитика)",
-        "desc": "Один длинный, тяжелый SELECT-запрос.",
-        "options": ["-c", "1", "-j", "1", "-T", "20", "-f", "/usr/src/app/load_profiler/olap_query.sql"] # 1 клиент, 20с, использует внешний скрипт
+        "name": "Heavy OLAP (CPU/Mem Bound)",
+        "profile": "Heavy OLAP (CPU/Mem Bound)",
+        "desc": "Один или несколько тяжелых запросов с JOIN и GROUP BY.",
+        "options": ["-c", "2", "-j", "1", "-T", "30", "-f", "load_profiler/olap_heavy.sql"] # 2 клиента, 30с, использует olap_heavy.sql
+    },
+    "4": {
+        "name": "Web / Read-Only (Session Heavy)",
+        "profile": "Web / Read-Only",
+        "desc": "Очень высокая конкуренция (SELECTы). Много активных сессий.",
+        "options": ["-c", "50", "-j", "4", "-T", "60", "-P", "10", "-f", "load_profiler/oltp_read_heavy.sql"] # 50 клиентов, 60с
+    },
+    "5": {
+        "name": "Mixed / HTAP",
+        "profile": "Mixed / HTAP",
+        "desc": "Смешанная нагрузка: 70% OLTP (дефолт) и 30% OLAP (olap_heavy).",
+        "options": ["-c", "20", "-j", "4", "-T", "60", "-P", "10", "--rate", "70", "-f", "load_profiler/olap_heavy.sql", "-f", "load_profiler/oltp_read_heavy.sql", "-p", "7:3"] # Соотношение 7:3
+    },
+    "6": {
+        "name": "Bulk Load (Синглтон)",
+        "profile": "Bulk Load",
+        "desc": "Одиночный поток, максимально быстрая запись (имитация COPY FROM).",
+        "options": ["-c", "1", "-j", "1", "-T", "20", "-b", "insert_simple"]
     }
 }
 
-def generate_load_menu():
-    """Показывает меню выбора нагрузки и запускает ее."""
-    print("\033c", end="")
-    print(f"{Style.BRIGHT}{Fore.YELLOW}=== ГЕНЕРАТОР НАГРУЗКИ (pgbench) ==={Style.RESET_ALL}")
-    print("Выберите тип нагрузки:")
+def init_pgbench_db():
+    """Инициализирует базу данных pgbench, если она еще не инициализирована."""
+    print(f"\n{Fore.GREEN}--- Подготовка: Инициализация БД (scale 10) ---{Style.RESET_ALL}")
+    # Параметры: -i (инициализация), -s 10 (масштаб 10)
+    init_cmd = PGBENCH_CMD_BASE + ["-i", "-s", "10"]
 
-    for key, scenario in LOAD_SCENARIOS.items():
-        print(f"[{key}] {scenario['name']}: {scenario['desc']}")
-
-    print(f"[0] {Fore.RED}Назад в Главное Меню{Style.RESET_ALL}")
-
-    choice = input(f"\n{Fore.WHITE}Введите номер нагрузки (0-3): {Style.RESET_ALL}")
-
-    if choice == '0':
-        return
-
-    if choice in LOAD_SCENARIOS:
-        scenario = LOAD_SCENARIOS[choice]
-        print(f"{Fore.GREEN}--- Подготовка: Инициализация БД для {scenario['name']}... ---{Style.RESET_ALL}")
-
-        # 1. Инициализация (требуется перед запуском pgbench)
-        # Масштаб 10 достаточно для демонстрации
-        init_cmd = PGBENCH_CMD_BASE + ["-i", "-s", "10"]
-        subprocess.run(init_cmd, check=True, text=True, capture_output=True)
-        print(f"{Fore.GREEN}Инициализация завершена.{Style.RESET_ALL}")
-
-        # 2. Запуск нагрузки
-        print(f"\n{Fore.GREEN}--- ЗАПУСК НАГРУЗКИ: {scenario['name']} ({scenario['options'][3]}с) ---{Style.RESET_ALL}")
-
-        full_cmd = PGBENCH_CMD_BASE + scenario['options']
-
-        # Запускаем в новом процессе и ждем завершения
-        # Не выводим сразу, чтобы не мешать выводу анализатора
-        process = subprocess.Popen(full_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-
-        print(f"{Fore.CYAN}Нагрузка запущена. Во время работы откройте Анализ в Реальном Времени (Опция 1) в другом окне.{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}Или дождитесь завершения, чтобы увидеть результат...{Style.RESET_ALL}")
-
-        # Ждем завершения процесса (Таймаут нагрузки задан в options)
-        process.wait()
-
-        print(f"\n{Fore.GREEN}--- НАГРУЗКА ЗАВЕРШЕНА. Результат pgbench: ---{Style.RESET_ALL}")
-        print(process.stdout.read())
-
-        input(f"{Fore.YELLOW}Нажмите Enter, чтобы вернуться в меню...{Style.RESET_ALL}")
-
-    else:
-        print(f"{Fore.RED}Неверный выбор. Попробуйте снова.{Style.RESET_ALL}")
+    try:
+        # Добавляем небольшой таймаут перед запуском, чтобы дать БД время
         time.sleep(1)
 
-# Дополнительный скрипт для OLAP, который нужно поместить в load_profiler/
-OLAP_QUERY_SCRIPT = """
-\\set aid random(1, 100000)
-\\set bid random(1, 100000)
-SELECT count(*) FROM pgbench_accounts a, pgbench_branches b, pgbench_tellers t
-WHERE a.aid = :aid AND b.bid = :bid AND a.bid = b.bid AND a.tid = t.tid
-GROUP BY a.aid;
-"""
+        # Запускаем команду и проверяем код возврата
+        result = subprocess.run(
+            init_cmd,
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=10 # Добавляем таймаут на всякий случай
+        )
+        print(f"{Fore.GREEN}Инициализация завершена успешно. Создано {len(result.stdout.splitlines())} строк лога.{Style.RESET_ALL}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}{Style.BRIGHT}[КРИТИЧЕСКАЯ ОШИБКА ИНИЦИАЛИЗАЦИИ pgbench]{Style.RESET_ALL}")
+        print(f"Команда: {' '.join(e.cmd)}")
+        print(f"Код ошибки: {e.returncode}")
+        print(f"{Fore.YELLOW}STDOUT (Вывод pgbench):{Style.RESET_ALL}\n{e.stdout}")
+        print(f"{Fore.YELLOW}STDERR (Ошибка pgbench):{Style.RESET_ALL}\n{e.stderr}")
+        print(f"{Fore.RED}Проверьте, что БД доступна, и пользователь 'user' может создавать таблицы.{Style.RESET_ALL}")
+        # Возвращаем False, чтобы не пытаться запускать нагрузку
+        return False
+    except subprocess.TimeoutExpired:
+        print(f"{Fore.RED}Инициализация pgbench превысила таймаут в 10 секунд. Проверьте БД.{Style.RESET_ALL}")
+        return False
+    except Exception as e:
+        print(f"{Fore.RED}Неизвестная ошибка при инициализации: {e}{Style.RESET_ALL}")
+        return False
+
+    return True
+
+
+def generate_load_menu():
+    """Показывает меню выбора нагрузки и запускает ее."""
+
+    if not init_pgbench_db():
+        input(f"\n{Fore.YELLOW}Исправьте ошибку инициализации pgbench. Нажмите Enter, чтобы вернуться в меню...{Style.RESET_ALL}")
+        return
+
+    while True:
+        print("\033c", end="")
+        print(f"{Style.BRIGHT}{Fore.YELLOW}=== ГЕНЕРАТОР НАГРУЗКИ (pgbench) ==={Style.RESET_ALL}")
+        print("Выберите тип нагрузки для генерации:")
+
+        for key, scenario in LOAD_SCENARIOS.items():
+            print(f"[{key}] {scenario['name']} ({scenario['profile']}): {scenario['desc']}")
+
+        print(f"[0] {Fore.RED}Назад в Главное Меню{Style.RESET_ALL}")
+
+        choice = input(f"\n{Fore.WHITE}Введите номер нагрузки (0-6): {Style.RESET_ALL}")
+
+        if choice == '0':
+            return
+
+        if choice in LOAD_SCENARIOS:
+            scenario = LOAD_SCENARIOS[choice]
+
+            # Запуск нагрузки
+            print(f"\n{Fore.GREEN}--- ЗАПУСК НАГРУЗКИ: {scenario['name']} ({scenario['options'][5]}с) ---{Style.RESET_ALL}")
+
+            full_cmd = PGBENCH_CMD_BASE + scenario['options']
+
+            # Запускаем в новом процессе
+            print(f"{Fore.CYAN}Нагрузка запущена. (Длительность: {scenario['options'][5]} секунд).{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}Переключитесь на Опцию 1 (Анализ в Реальном Времени) в другом окне.{Style.RESET_ALL}")
+
+            process = subprocess.Popen(full_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            # Ждем завершения
+            process.wait()
+
+            print(f"\n{Fore.GREEN}--- НАГРУЗКА ЗАВЕРШЕНА ({scenario['name']}). Результат pgbench: ---{Style.RESET_ALL}")
+            print(process.stdout.read())
+
+            input(f"{Fore.YELLOW}Нажмите Enter, чтобы вернуться в меню...{Style.RESET_ALL}")
+            break # Выходим из цикла выбора нагрузки
+
+        else:
+            print(f"{Fore.RED}Неверный выбор. Попробуйте снова.{Style.RESET_ALL}")
+            time.sleep(1)

@@ -93,7 +93,7 @@ def show_menu():
     print("3: Показать Полный Справочник Рекомендаций")
     print("4: Настроить Пороги Классификации (Тюнинг)")
     print("5: Установить Интервал Анализа (Текущий: {}s)".format(current_analysis_interval))
-    print(f"6: {Style.BRIGHT}{Fore.YELLOW}Запустить Генератор Нагрузки (pgbench){Style.RESET_ALL}") # <-- ДОБАВЛЕНО
+    print(f"6: {Style.BRIGHT}{Fore.YELLOW}Запустить Генератор Нагрузки (pgbench){Style.RESET_ALL}")
     print("0: Выход")
     print("-" * 50)
     return input(f"{Fore.WHITE}Выберите опцию (0-6): {Style.RESET_ALL}")
