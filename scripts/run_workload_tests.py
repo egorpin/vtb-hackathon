@@ -121,7 +121,7 @@ class WorkloadTestSuite:
 # Тестовые нагрузки
 class WorkloadGenerators:
     def __init__(self):
-        self.conn_string = "host=postgres user=postgres password=password dbname=tpc_tests"
+        self.conn_string = "host=postgres user=postgres password=password dbname=db"
 
     def setup_test_data(self):
         """Настройка тестовых данных"""

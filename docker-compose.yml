@@ -6,12 +6,12 @@ services:
     container_name: vtb_postgres
     restart: always
     environment:
-      POSTGRES_DB: tpc_tests
-      POSTGRES_USER: postgres
+      POSTGRES_DB: mydb
+      POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts:/scripts
@@ -28,9 +28,11 @@ services:
       context: .
       dockerfile: Dockerfile.metrics
     depends_on:
-      - postgres
+      - db
     volumes:
       - ./scripts:/scripts
       - ./results:/results
       - ./workloads:/workloads
     working_dir: /scripts
+volumes:
+  postgres_data:
