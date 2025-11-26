@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  # Сервис базы данных PostgreSQL
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # Для сохранения данных
+    ports:
+      - "5432:5432" # Проброс порта на хост (необходимо, если вы хотите обращаться из хост-системы, например, PGAdmin)
+
+  # Сервис вашего Python-приложения
+  web:
+    build: . # Использовать Dockerfile в текущей директории
+    command: python app.py # Запуск вашего основного скрипта
+    volumes:
+      - .:/app # Монтирование текущей папки проекта
+    ports:
+      - "8000:8000" # Если у вас есть веб-приложение
+    depends_on:
+      - db # Указывает, что web зависит от db
+
+volumes:
+  postgres_data:
