@@ -1,0 +1,19 @@
+# 1-ый терминал: Запуск системы
+docker rm -f $(docker ps -aq)  # удаляет все контейнеры
+docker-compose up --build --remove-orphans
+
+# 2-ой терминал: Тестирование нагрузки
+# Инициализация pgbench
+docker exec -it vtb_postgres pgbench -i -s 10 -U user mydb
+
+# OLTP тест
+docker exec -it vtb_postgres pgbench -c 20 -j 2 -T 30 -U user mydb
+
+# Запуск TPC-C теста через HammerDB
+docker exec -it vtb_hammerdb hammerdbcli auto run_tpcc.tcl
+
+# Запуск автоматического тестирования
+python testing/run_benchmarks.py
+
+# Просмотр результатов тестов в БД
+docker exec -it vtb_postgres psql -U user -d mydb -c "SELECT * FROM benchmark_results ORDER BY timestamp DESC LIMIT 10;"

@@ -1,36 +1,35 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15
+  db:
+    image: postgres:16-alpine
+    container_name: vtb_postgres
+    restart: always
     environment:
-      POSTGRES_DB: tpc_tests
-      POSTGRES_USER: postgres
+      POSTGRES_USER: user
       POSTGRES_PASSWORD: password
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: mydb
     ports:
-      - "5432:5432"
+      - "5433:5432"
+    command: postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts:/scripts
-      - ./workloads:/workloads
-    command: >
-      postgres 
-      -c shared_preload_libraries=pg_stat_statements
-      -c pg_stat_statements.track=all
-      -c pg_stat_statements.max=10000
+      - postgres_data:/var/lib/postgresql/data/
+      - ./profiles.sql:/docker-entrypoint-initdb.d/init_profiles.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  metrics-collector:
-    build:
-      context: .
-      dockerfile: Dockerfile.metrics
-    depends_on:
-      - postgres
+  hammerdb:
+    image: tpcorg/hammerdb
+    container_name: vtb_hammerdb
     volumes:
-      - ./scripts:/scripts
-      - ./results:/results
-      - ./workloads:/workloads
-    working_dir: /scripts
+      - ./hammerdb:/hammerdb
+    working_dir: /hammerdb
+    depends_on:
+      - db
+    command: ["sleep", "infinity"]
 
 volumes:
   postgres_data:
