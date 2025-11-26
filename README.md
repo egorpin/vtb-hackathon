@@ -1,2 +1,0 @@
-# vtb-hackathon
-# + flikz

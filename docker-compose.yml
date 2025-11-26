@@ -6,22 +6,33 @@ services:
     container_name: vtb_postgres
     restart: always
     environment:
-      POSTGRES_USER: user
+      POSTGRES_DB: tpc_tests
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydb
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5433:5432"
-    # Включаем статистику (обязательно для алгоритма)
-    command: postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
-      # Монтируем файл профилей, чтобы он выполнился при создании базы
-      - ./profiles.sql:/docker-entrypoint-initdb.d/init_profiles.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts:/scripts
+      - ./workloads:/workloads
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+
+  metrics-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.metrics
+    depends_on:
+      - postgres
+    volumes:
+      - ./scripts:/scripts
+      - ./results:/results
+      - ./workloads:/workloads
+    working_dir: /scripts
 
 volumes:
   postgres_data:
