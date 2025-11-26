@@ -3,6 +3,7 @@ import sys
 from datetime import datetime
 from colorama import init, Fore, Style
 from tabulate import tabulate
+from load_generator import generate_load_menu
 
 # Импорты наших модулей
 from config import DB_CONFIG, ANALYSIS_INTERVAL, RECOMMENDATIONS
@@ -91,10 +92,11 @@ def show_menu():
     print("2: Запустить Единичный Снимок")
     print("3: Показать Полный Справочник Рекомендаций")
     print("4: Настроить Пороги Классификации (Тюнинг)")
-    print(f"5: Установить Интервал Анализа (Текущий: {current_analysis_interval}s)")
+    print("5: Установить Интервал Анализа (Текущий: {}s)".format(current_analysis_interval))
+    print(f"6: {Style.BRIGHT}{Fore.YELLOW}Запустить Генератор Нагрузки (pgbench){Style.RESET_ALL}") # <-- ДОБАВЛЕНО
     print("0: Выход")
     print("-" * 50)
-    return input(f"{Fore.WHITE}Выберите опцию (0-5): {Style.RESET_ALL}")
+    return input(f"{Fore.WHITE}Выберите опцию (0-6): {Style.RESET_ALL}")
 
 def main():
     # Инициализация подключения
@@ -119,11 +121,13 @@ def main():
                 edit_thresholds(analyzer)
             elif choice == '5':
                 set_interval()
+            elif choice == '6':
+                generate_load_menu()
             elif choice == '0':
                 print(f"{Fore.MAGENTA}Программа остановлена.{Style.RESET_ALL}")
                 sys.exit(0)
             else:
-                print(f"{Fore.RED}Неизвестная опция '{choice}'. Пожалуйста, выберите число от 0 до 5.{Style.RESET_ALL}")
+                print(f"{Fore.RED}Неизвестная опция '{choice}'. Пожалуйста, выберите число от 0 до 6.{Style.RESET_ALL}")
                 time.sleep(1)
         except Exception as e:
             print(f"{Fore.RED}Критическая ошибка в меню: {e}{Style.RESET_ALL}")
