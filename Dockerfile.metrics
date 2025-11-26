@@ -1,0 +1,12 @@
+FROM python:3.11
+
+# Install PostgreSQL client and other tools
+RUN apt-get update && \
+    apt-get install -y postgresql-client postgresql-contrib && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python PostgreSQL driver
+RUN pip install psycopg2-binary
+
+WORKDIR /scripts
+CMD ["tail", "-f", "/dev/null"]
