@@ -1,2 +1,3 @@
 psycopg2-binary
-# Другие пакеты (например, Flask, Django, SQLAlchemy)
+colorama
+tabulate

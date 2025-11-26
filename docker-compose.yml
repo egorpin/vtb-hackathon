@@ -1,28 +1,43 @@
 version: '3.8'
+
 services:
-  # Сервис базы данных PostgreSQL
+  # 1. Сервис базы данных PostgreSQL
   db:
-    image: postgres:16
+    image: postgres:16-alpine  # Используем 16 версию (стабильная и подходит под требования 15+)
+    container_name: vtb_postgres
     restart: always
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydatabase
-    volumes:
-      - postgres_data:/var/lib/postgresql/data  # Для сохранения данных
+      POSTGRES_DB: mydb
     ports:
-      - "5432:5432" # Проброс порта на хост (необходимо, если вы хотите обращаться из хост-системы, например, PGAdmin)
+      - "5433:5432"
+    # !ВАЖНО! Включаем сбор статистики для алгоритма
+    command: postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
 
-  # Сервис вашего Python-приложения
-  web:
-    build: . # Использовать Dockerfile в текущей директории
-    command: python app.py # Запуск вашего основного скрипта
-    volumes:
-      - .:/app # Монтирование текущей папки проекта
-    ports:
-      - "8000:8000" # Если у вас есть веб-приложение
+  # 2. Сервис твоего алгоритма
+  app:
+    build: .
+    container_name: vtb_algo_app
     depends_on:
-      - db # Указывает, что web зависит от db
+      db:
+        condition: service_healthy
+    environment:
+      # Передаем настройки подключения через ENV
+      DB_HOST: db        # Имя сервиса в сети Docker
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: mydb
+    # tty: true нужен, чтобы цвета (colorama) работали корректно в логах
+    tty: true 
 
 volumes:
   postgres_data:
