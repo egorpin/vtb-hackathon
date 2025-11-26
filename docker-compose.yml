@@ -16,6 +16,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts:/scripts
       - ./workloads:/workloads
+      - ./profiles.sql:/docker-entrypoint-initdb.d/init_profiles.sql
     command: >
       postgres
       -c shared_preload_libraries=pg_stat_statements
@@ -33,6 +34,3 @@ services:
       - ./results:/results
       - ./workloads:/workloads
     working_dir: /scripts
-
-volumes:
-  postgres_data:
