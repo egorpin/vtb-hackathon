@@ -37,7 +37,8 @@ services:
       DB_PASSWORD: password
       DB_NAME: mydb
     # tty: true нужен, чтобы цвета (colorama) работали корректно в логах
-    tty: true 
+    tty: true
+    stdin_open: true
 
 volumes:
   postgres_data:
