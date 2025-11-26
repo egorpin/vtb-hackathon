@@ -24,7 +24,7 @@ from benchmark_runner import BenchmarkRunner
 class SimpleVTBProfiler:
     def __init__(self, root):
         self.root = root
-        self.root.title("VTB Load Profiler - Complete Testing Suite")
+        self.root.title("VTB Load Profiler - Benchmark System")
         self.root.geometry("1400x900")
 
         # Initialize components
@@ -42,7 +42,6 @@ class SimpleVTBProfiler:
 
         self.history_tps = deque([0]*60, maxlen=60)
         self.history_lat = deque([0]*60, maxlen=60)
-        self.load_thread = None
         self.running = True
 
         self.setup_ui()
@@ -53,86 +52,67 @@ class SimpleVTBProfiler:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Left panel - Controls
-        left_frame = ttk.LabelFrame(main_frame, text="Load Controller", padding="15", width=300)
+        # Left panel - Benchmark Controller
+        left_frame = ttk.LabelFrame(main_frame, text="Benchmark Controller", padding="15", width=300)
         left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         left_frame.pack_propagate(False)
 
         # Title
         ttk.Label(left_frame, text="⚡ VTB Profiler", font=('Arial', 14, 'bold')).pack(anchor=tk.W, pady=(0, 10))
-        ttk.Label(left_frame, text="LOAD CONTROLLER").pack(anchor=tk.W, pady=(0, 20))
+        ttk.Label(left_frame, text="BENCHMARK SYSTEM").pack(anchor=tk.W, pady=(0, 20))
 
-        # Load buttons
-        ttk.Button(left_frame, text="🏦 Start OLTP Load",
-                  command=lambda: self.start_load("OLTP"),
-                  width=20).pack(fill=tk.X, pady=5)
-        ttk.Button(left_frame, text="📊 Start OLAP Load",
-                  command=lambda: self.start_load("OLAP"),
-                  width=20).pack(fill=tk.X, pady=5)
-        ttk.Button(left_frame, text="📡 Start IoT Load",
-                  command=lambda: self.start_load("IoT"),
-                  width=20).pack(fill=tk.X, pady=5)
-        ttk.Button(left_frame, text="🔄 Start Mixed Load",
-                  command=lambda: self.start_load("Mixed"),
-                  width=20).pack(fill=tk.X, pady=5)
-        ttk.Button(left_frame, text="⛔ STOP LOAD",
-                  command=lambda: self.start_load("STOP"),
-                  width=20).pack(fill=tk.X, pady=5)
+        # Individual Benchmark Buttons
+        ttk.Label(left_frame, text="RUN INDIVIDUAL TESTS:", font=('Arial', 11, 'bold')).pack(anchor=tk.W, pady=(0, 5))
 
-        # Status
+        ttk.Button(left_frame, text="🧪 OLTP Benchmark",
+                  command=lambda: self.run_benchmark("Classic OLTP", "OLTP"),
+                  width=20).pack(fill=tk.X, pady=2)
+        ttk.Button(left_frame, text="🧪 OLAP Benchmark",
+                  command=lambda: self.run_benchmark("Heavy OLAP", "OLAP"),
+                  width=20).pack(fill=tk.X, pady=2)
+        ttk.Button(left_frame, text="🧪 IoT Benchmark",
+                  command=lambda: self.run_benchmark("IoT / Ingestion", "IoT"),
+                  width=20).pack(fill=tk.X, pady=2)
+        ttk.Button(left_frame, text="🧪 Mixed Benchmark",
+                  command=lambda: self.run_benchmark("Mixed / HTAP", "Mixed"),
+                  width=20).pack(fill=tk.X, pady=2)
+
         ttk.Separator(left_frame, orient='horizontal').pack(fill=tk.X, pady=15)
-        ttk.Label(left_frame, text="Status:").pack(anchor=tk.W)
-        self.status_var = tk.StringVar(value="Ready")
-        status_label = ttk.Label(left_frame, textvariable=self.status_var, foreground="darkgreen")
-        status_label.pack(anchor=tk.W, pady=(0, 10))
 
-        # Benchmark section
-        ttk.Label(left_frame, text="SPECIALIZED TESTERS", font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(10, 5))
+        # Test Suite Controls
+        ttk.Label(left_frame, text="TEST SUITE CONTROLS:", font=('Arial', 11, 'bold')).pack(anchor=tk.W, pady=(0, 5))
 
-        # Отдельные тестировщики для каждого типа нагрузки
-        ttk.Button(left_frame, text="🧪 OLTP Tester",
-                  command=lambda: self.run_specialized_test("OLTP"),
-                  width=20).pack(fill=tk.X, pady=2)
-        ttk.Button(left_frame, text="🧪 OLAP Tester",
-                  command=lambda: self.run_specialized_test("OLAP"),
-                  width=20).pack(fill=tk.X, pady=2)
-        ttk.Button(left_frame, text="🧪 IoT Tester",
-                  command=lambda: self.run_specialized_test("IoT"),
-                  width=20).pack(fill=tk.X, pady=2)
-        ttk.Button(left_frame, text="🧪 Mixed Tester",
-                  command=lambda: self.run_specialized_test("Mixed"),
-                  width=20).pack(fill=tk.X, pady=2)
-
-        ttk.Separator(left_frame, orient='horizontal').pack(fill=tk.X, pady=10)
-
-        # Стандартные тесты профилей
-        ttk.Button(left_frame, text="📊 Benchmark Report",
-                  command=self.show_benchmark_report,
+        ttk.Button(left_frame, text="🚀 Run Full Test Suite",
+                  command=self.run_full_test_suite,
                   width=20).pack(fill=tk.X, pady=5)
-        ttk.Button(left_frame, text="🚀 Auto Test All",
-                  command=self.run_auto_benchmarks,
+        ttk.Button(left_frame, text="📊 Show Benchmark Report",
+                  command=self.show_benchmark_report,
                   width=20).pack(fill=tk.X, pady=2)
         ttk.Button(left_frame, text="🔄 Clean Failed Tests",
                   command=self.cleanup_failed_tests,
                   width=20).pack(fill=tk.X, pady=2)
 
-        # Benchmark status
+        # Status
         ttk.Separator(left_frame, orient='horizontal').pack(fill=tk.X, pady=15)
         ttk.Label(left_frame, text="Benchmark Status:").pack(anchor=tk.W)
-        self.benchmark_status_var = tk.StringVar(value="Ready for testing")
+        self.benchmark_status_var = tk.StringVar(value="Ready to run benchmarks")
         benchmark_status_label = ttk.Label(left_frame, textvariable=self.benchmark_status_var, foreground="darkgreen")
-        benchmark_status_label.pack(anchor=tk.W)
+        benchmark_status_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # Progress
+        self.progress_var = tk.StringVar(value="No active tests")
+        ttk.Label(left_frame, textvariable=self.progress_var, font=('Arial', 9), foreground="blue").pack(anchor=tk.W)
 
         # Right panel - Dashboard
         right_frame = ttk.Frame(main_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         # Profile detection
-        profile_frame = ttk.LabelFrame(right_frame, text="Profile Detection", padding="15")
+        profile_frame = ttk.LabelFrame(right_frame, text="System Status & Profile Detection", padding="15")
         profile_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self.profile_var = tk.StringVar(value="DETECTING...")
-        self.confidence_var = tk.StringVar(value="Confidence: --")
+        self.profile_var = tk.StringVar(value="SYSTEM IDLE")
+        self.confidence_var = tk.StringVar(value="Run benchmarks to see performance data")
 
         self.profile_label = ttk.Label(profile_frame, textvariable=self.profile_var,
                                      font=("Arial", 20, "bold"), foreground="gray")
@@ -176,7 +156,7 @@ class SimpleVTBProfiler:
                  foreground="orange").pack()
 
         # Charts
-        chart_frame = ttk.LabelFrame(right_frame, text="Performance Charts", padding="10")
+        chart_frame = ttk.LabelFrame(right_frame, text="Performance Metrics During Benchmarks", padding="10")
         chart_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # Create matplotlib figure
@@ -185,12 +165,18 @@ class SimpleVTBProfiler:
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Results text area
-        results_frame = ttk.LabelFrame(right_frame, text="AI Recommendations & Benchmark Results", padding="10")
+        results_frame = ttk.LabelFrame(right_frame, text="Benchmark Results & AI Recommendations", padding="10")
         results_frame.pack(fill=tk.BOTH, expand=False)
 
         self.results_text = scrolledtext.ScrolledText(results_frame, height=12, width=100)
         self.results_text.pack(fill=tk.BOTH, expand=True)
-        self.results_text.insert(tk.END, "=== VTB Load Profiler ===\n\nSystem ready. Use specialized testers for each load type.")
+        self.results_text.insert(tk.END, "=== VTB LOAD PROFILER - BENCHMARK SYSTEM ===\n\n"
+                                       "Welcome! Use the benchmark controls to:\n"
+                                       "• Run individual load tests (OLTP, OLAP, IoT, Mixed)\n"
+                                       "• Execute full test suite for comprehensive comparison\n"
+                                       "• View detailed benchmark reports with performance analysis\n"
+                                       "• Get AI-powered configuration recommendations\n\n"
+                                       "Click 'Run Full Test Suite' to start!")
         self.results_text.config(state=tk.DISABLED)
 
     def start_updates(self):
@@ -247,173 +233,120 @@ class SimpleVTBProfiler:
 
             self.canvas.draw()
 
-            # Update Recommendations
-            base_name = profile.split(" (")[0]
-            if base_name in self.profiles_db:
-                data = self.profiles_db[base_name]
-                text = f"🤖 AI CONFIG RECOMMENDATIONS for {base_name}:\n\n"
-                for k, v in data.items():
-                    text += f"• {k} = {v}\n"
+            # Update Recommendations only when we have meaningful data
+            if metrics["TPS"] > 1 or metrics["Active Sessions (ASH)"] > 0.5:
+                base_name = profile.split(" (")[0]
+                if base_name in self.profiles_db:
+                    data = self.profiles_db[base_name]
+                    text = f"🤖 AI CONFIG RECOMMENDATIONS for {base_name}:\n\n"
+                    for k, v in data.items():
+                        text += f"• {k} = {v}\n"
 
-                self._update_results_text(text)
+                    # Only update if we're not showing benchmark results
+                    current_text = self.results_text.get(1.0, tk.END)
+                    if "BENCHMARK RESULTS" not in current_text and "COMPREHENSIVE BENCHMARK" not in current_text:
+                        self._update_results_text(text)
 
         except Exception as e:
             print(f"❌ Error updating stats: {e}")
 
-    def start_load(self, mode):
-        def run_load():
-            container = "vtb_postgres"
-            try:
-                if mode == "OLTP":
-                    self.status_var.set("Generating OLTP load...")
-                    cmd = ["docker", "exec", "-i", container, "pgbench", "-c", "6", "-j", "2", "-T", "30", "-U", "user", "mydb", "-r"]
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    if result.returncode == 0:
-                        self.status_var.set("OLTP Load Finished")
-                        tps, latency = self._parse_pgbench_output(result.stdout)
-                        result_text = f"📊 OLTP Load Results:\nTPS: {tps:.1f}, Latency: {latency:.2f}ms"
-                        self._update_results_text(result_text)
-                    else:
-                        self.status_var.set("OLTP Load Failed")
-
-                elif mode == "OLAP":
-                    self.status_var.set("Generating OLAP load...")
-                    # Тяжелые аналитические запросы
-                    sql = """
-                    SELECT count(*), avg(a.aid), sum(a.abalance)
-                    FROM pgbench_accounts a
-                    JOIN pgbench_branches b ON a.bid = b.bid
-                    JOIN pgbench_tellers t ON a.bid = t.bid
-                    WHERE a.abalance > 0
-                    GROUP BY b.bid, t.tid;
-                    """
-                    cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", sql]
-
-                    completed = 0
-                    for i in range(10):
-                        if not self.running: break
-                        result = subprocess.run(cmd, capture_output=True, text=True)
-                        if result.returncode == 0:
-                            completed += 1
-                        self.status_var.set(f"OLAP Load... {i+1}/10")
-                        time.sleep(2)
-
-                    self.status_var.set(f"OLAP Load Finished ({completed}/10 queries)")
-
-                elif mode == "IoT":
-                    self.status_var.set("Generating IoT load...")
-                    # Интенсивные вставки
-                    sql = "INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (1, 1, 1, 0, CURRENT_TIMESTAMP);"
-                    cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", sql]
-
-                    completed = 0
-                    for i in range(100):
-                        if not self.running: break
-                        result = subprocess.run(cmd, capture_output=True, text=True)
-                        if result.returncode == 0:
-                            completed += 1
-                        if i % 20 == 0:
-                            self.status_var.set(f"IoT Load... {i}/100")
-
-                    self.status_var.set(f"IoT Load Finished ({completed} inserts)")
-
-                elif mode == "Mixed":
-                    self.status_var.set("Generating Mixed load...")
-                    # Смешанная нагрузка
-                    queries = [
-                        "SELECT count(*) FROM pgbench_accounts;",
-                        "INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (1, 1, 1, 0, CURRENT_TIMESTAMP);",
-                        "SELECT avg(abalance) FROM pgbench_accounts WHERE bid = 1;"
-                    ]
-
-                    for i in range(20):
-                        if not self.running: break
-                        query = queries[i % len(queries)]
-                        cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
-                        subprocess.run(cmd, capture_output=True, text=True)
-                        self.status_var.set(f"Mixed Load... {i+1}/20")
-                        time.sleep(0.5)
-
-                    self.status_var.set("Mixed Load Finished")
-
-                elif mode == "STOP":
-                    self.status_var.set("Stopping all loads...")
-                    subprocess.run(["docker", "exec", "-i", container, "pkill", "pgbench"],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    subprocess.run(["docker", "exec", "-i", container, "pkill", "psql"],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    self.status_var.set("All Loads Stopped")
-
-            except Exception as e:
-                self.status_var.set(f"Error: {str(e)}")
-
-        thread = threading.Thread(target=run_load, daemon=True)
-        thread.start()
-
-    def run_specialized_test(self, test_type):
-        """Запускает специализированный тестировщик для конкретного типа нагрузки"""
+    def run_benchmark(self, profile_name, test_type):
+        """Запускает один бенчмарк"""
         def run_test():
-            self.benchmark_status_var.set(f"Running {test_type} tester...")
+            self.benchmark_status_var.set(f"Running {test_type} benchmark...")
+            self.progress_var.set(f"Testing: {profile_name}")
 
-            profile_map = {
-                "OLTP": "Classic OLTP",
-                "OLAP": "Heavy OLAP",
-                "IoT": "IoT / Ingestion",
-                "Mixed": "Mixed / HTAP"
+            # Map test type to benchmark method
+            test_methods = {
+                "OLTP": self.benchmark_runner.run_oltp_test,
+                "OLAP": self.benchmark_runner.run_olap_test,
+                "IoT": self.benchmark_runner.run_iot_test,
+                "Mixed": self.benchmark_runner.run_mixed_test
             }
 
-            profile_name = profile_map.get(test_type, test_type)
+            method = test_methods.get(test_type)
+            if not method:
+                self.benchmark_status_var.set(f"Error: Unknown test type {test_type}")
+                return
 
-            if test_type == "OLTP":
-                results = self.benchmark_runner.run_oltp_test(profile_name, duration=25)
-            elif test_type == "OLAP":
-                results = self.benchmark_runner.run_olap_test(profile_name, duration=25)
-            elif test_type == "IoT":
-                results = self.benchmark_runner.run_iot_test(profile_name, duration=25)
-            elif test_type == "Mixed":
-                results = self.benchmark_runner.run_mixed_test(profile_name, duration=25)
-            else:
-                results = {'error': f'Unknown test type: {test_type}'}
+            results = method(profile_name, duration=25)
 
             if 'error' in results:
                 self.benchmark_status_var.set(f"Error: {results['error']}")
-                self._update_results_text(f"❌ {test_type} test failed:\n{results['error']}")
+                self._update_results_text(f"❌ {test_type} benchmark failed:\n{results['error']}")
             else:
                 tps = results.get('tps', 0)
                 latency = results.get('avg_latency', 0)
-                self.benchmark_status_var.set(f"Done: {tps:.1f} TPS, {latency:.2f}ms latency")
+                self.benchmark_status_var.set(f"Completed: {tps:.1f} TPS, {latency:.2f}ms latency")
+                self.progress_var.set("Test completed successfully")
 
-                result_text = f"✅ {test_type.upper()} TEST RESULTS:\n\n"
+                result_text = f"✅ {test_type.upper()} BENCHMARK RESULTS:\n\n"
                 result_text += f"• Profile: {profile_name}\n"
                 result_text += f"• TPS: {tps:.1f}\n"
-                result_text += f"• Latency: {latency:.2f} ms\n"
-                result_text += f"• Test Type: {results.get('test_type', 'N/A')}\n"
-                result_text += f"• Duration: {results.get('duration_minutes', 0)} min\n"
-                result_text += f"• Clients: {results.get('clients', 0)}\n"
+                result_text += f"• TPM: {results.get('tpm', 0):.0f}\n"
+                result_text += f"• Average Latency: {latency:.2f} ms\n"
+                result_text += f"• Duration: {results.get('duration_minutes', 0)} minutes\n"
+                result_text += f"• Clients: {results.get('clients', 0)}\n\n"
+
+                # Add performance analysis
+                if tps > 1000:
+                    result_text += "📈 EXCELLENT PERFORMANCE - System handles high transactional load well\n"
+                elif tps > 500:
+                    result_text += "📊 GOOD PERFORMANCE - Solid transactional throughput\n"
+                else:
+                    result_text += "⚠️  MODERATE PERFORMANCE - Consider tuning configuration\n"
 
                 self._update_results_text(result_text)
 
         thread = threading.Thread(target=run_test, daemon=True)
         thread.start()
 
-    def run_auto_benchmarks(self):
-        """Запускает автоматическое тестирование всех типов нагрузки"""
-        def run_auto():
-            self.benchmark_status_var.set("Running comprehensive test suite...")
+    def run_full_test_suite(self):
+        """Запускает полную батарею тестов"""
+        def run_suite():
+            self.benchmark_status_var.set("Starting comprehensive benchmark suite...")
 
-            test_types = ["OLTP", "OLAP", "IoT", "Mixed"]
+            test_sequence = [
+                ("Classic OLTP", "OLTP"),
+                ("Heavy OLAP", "OLAP"),
+                ("IoT / Ingestion", "IoT"),
+                ("Mixed / HTAP", "Mixed")
+            ]
 
-            for i, test_type in enumerate(test_types):
-                self.benchmark_status_var.set(f"Testing {test_type} ({i+1}/{len(test_types)})...")
-                self.run_specialized_test(test_type)
+            total_tests = len(test_sequence)
 
-                # Ждем завершения теста
-                time.sleep(30)  # Увеличили время ожидания между тестами
+            for i, (profile, test_type) in enumerate(test_sequence):
+                current_test = i + 1
+                self.benchmark_status_var.set(f"Running test {current_test}/{total_tests}: {test_type}")
+                self.progress_var.set(f"Progress: {current_test}/{total_tests} - {profile}")
 
-            self.benchmark_status_var.set("Comprehensive testing completed")
+                # Run the benchmark
+                test_methods = {
+                    "OLTP": self.benchmark_runner.run_oltp_test,
+                    "OLAP": self.benchmark_runner.run_olap_test,
+                    "IoT": self.benchmark_runner.run_iot_test,
+                    "Mixed": self.benchmark_runner.run_mixed_test
+                }
+
+                method = test_methods.get(test_type)
+                if method:
+                    method(profile, duration=20)
+
+                # Show progress
+                progress_text = f"🏃‍♂️ Test Suite Progress: {current_test}/{total_tests} completed\n"
+                progress_text += f"Current: {test_type} - {profile}\n"
+                progress_text += f"Next: {test_sequence[i+1][1] if i+1 < total_tests else 'COMPLETION'}\n"
+                self._update_results_text(progress_text)
+
+                # Wait between tests (except after the last one)
+                if i < total_tests - 1:
+                    time.sleep(5)
+
+            self.benchmark_status_var.set("Full test suite completed!")
+            self.progress_var.set("All tests finished - ready for analysis")
             self.show_benchmark_report()
 
-        thread = threading.Thread(target=run_auto, daemon=True)
+        thread = threading.Thread(target=run_suite, daemon=True)
         thread.start()
 
     def cleanup_failed_tests(self):
@@ -422,20 +355,22 @@ class SimpleVTBProfiler:
             self.benchmark_status_var.set("Cleaning failed tests...")
             deleted_count = self.benchmark_runner.cleanup_failed_tests()
             self.benchmark_status_var.set(f"Cleaned {deleted_count} failed tests")
+            self.progress_var.set("Database maintenance completed")
             self.show_benchmark_report()
 
         thread = threading.Thread(target=run_cleanup, daemon=True)
         thread.start()
 
     def show_benchmark_report(self):
-        """Показывает сравнительный отчет"""
+        """Показывает сравнительный отчет всех бенчмарков"""
         results = self.benchmark_runner.get_comparison_report()
 
         report_text = "=== COMPREHENSIVE BENCHMARK REPORT ===\n\n"
 
         if not results:
-            report_text += "No benchmark data available. Run some tests first.\n"
-            report_text += "Use specialized testers or 'Auto Test All' button."
+            report_text += "No benchmark data available.\n"
+            report_text += "Run individual tests or the full test suite first.\n\n"
+            report_text += "Recommended: Click 'Run Full Test Suite' for complete analysis."
         else:
             report_text += f"{'Profile':<20} {'Test Type':<10} {'TPS':<8} {'TPM':<8} {'Latency':<12} {'Tests':<6}\n"
             report_text += "-" * 75 + "\n"
@@ -452,30 +387,31 @@ class SimpleVTBProfiler:
             report_text += "• Latency (ms) - lower is better\n"
             report_text += "• Tests - number of successful test runs\n\n"
 
-            # Анализ лучшего профиля
+            # Performance ranking and recommendations
             if results:
+                # Find best performing profile
                 best_tps = max([r[2] for r in results if r[2] is not None])
+                best_profile = None
                 for profile, test_type, tps, tpm, latency, tests in results:
                     if tps == best_tps:
-                        report_text += f"🏆 BEST PERFORMANCE: {profile} ({test_type}) with {tps:.1f} TPS\n"
+                        best_profile = (profile, test_type, tps, latency)
                         break
 
+                if best_profile:
+                    report_text += f"🏆 BEST PERFORMANCE: {best_profile[0]} ({best_profile[1]})\n"
+                    report_text += f"   • TPS: {best_profile[2]:.1f}\n"
+                    report_text += f"   • Latency: {best_profile[3]:.2f} ms\n\n"
+
+                # Configuration recommendations
+                report_text += "🤖 AI CONFIGURATION RECOMMENDATIONS:\n"
+                for profile, test_type, tps, tpm, latency, tests in results:
+                    if profile in self.profiles_db:
+                        data = self.profiles_db[profile]
+                        report_text += f"\n{profile}:\n"
+                        for k, v in data.items():
+                            report_text += f"  • {k} = {v}\n"
+
         self._update_results_text(report_text)
-
-    def _parse_pgbench_output(self, output):
-        """Парсит вывод pgbench"""
-        tps = 0.0
-        avg_latency = 0.0
-
-        tps_match = re.search(r'tps = (\d+\.\d+)', output)
-        if tps_match:
-            tps = float(tps_match.group(1))
-
-        latency_match = re.search(r'latency average = (\d+\.\d+) ms', output)
-        if latency_match:
-            avg_latency = float(latency_match.group(1))
-
-        return tps, avg_latency
 
     def _update_results_text(self, text):
         """Обновляет текстовое поле с результатами"""
