@@ -1,9 +1,0 @@
-1-ый терминал:
-docker rm -f $(docker ps -aq)  # удаляет все контейнеры
-
-docker-compose up --build --remove-orphans
-
-2-ой терминал тестирование нагурзки:
-docker exec -it vtb_postgres pgbench -i -s 10 -U user mydb        # инициализация
-
-docker exec -it vtb_postgres pgbench -c 20 -j 2 -T 30 -U user mydb  # OLTP 
