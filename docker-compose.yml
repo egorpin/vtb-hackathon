@@ -6,8 +6,8 @@ services:
     container_name: vtb_postgres
     restart: always
     environment:
-      POSTGRES_DB: mydb
-      POSTGRES_USER: user
+      POSTGRES_DB: tpc_tests
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
