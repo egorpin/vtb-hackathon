@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # 1. Сервис базы данных PostgreSQL
+  db:
+    image: postgres:18-alpine # Или другая версия
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: ${DB_NAME:-mydb}
+    ports:
+      - "5432:5432" # Опционально, для доступа снаружи
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    healthcheck: # Проверка готовности БД
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Сервис Python-приложения
+  app:
+    build: . # Указывает на Dockerfile в текущей директории
+    container_name: python_app
+    volumes:
+      - .:/usr/src/app
+    ports:
+      - "8000:8000" # Пример для веб-приложения
+    depends_on:
+      db:
+        condition: service_healthy # Запускать только после готовности БД
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@db:5432/${DB_NAME:-mydb}
+
+volumes:
+  postgres_data:
