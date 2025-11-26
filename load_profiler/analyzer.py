@@ -1,15 +1,15 @@
 class ProfileAnalyzer:
     def analyze(self, prev, curr, duration):
-        # Вычисляем дельты
+        # Дельты
         d_commits = curr["commits"] - prev["commits"]
         d_inserted = curr["tup_inserted"] - prev["tup_inserted"]
         d_fetched = curr["tup_fetched"] - prev["tup_fetched"]
         
-        # Базовые метрики
+        # Основные метрики
         tps = d_commits / duration
         avg_active = (prev["active_sessions"] + curr["active_sessions"]) / 2
         
-        # Основная формула: Стоимость одной транзакции в секундах работы БД
+        # --- ФОРМУЛА: Tx Cost (ASH / Commit) ---
         tx_cost = (avg_active * duration) / d_commits if d_commits > 0 else 999.0
         
         read_write_ratio = d_fetched / d_inserted if d_inserted > 0 else 999.0
@@ -20,11 +20,10 @@ class ProfileAnalyzer:
             "Active Sessions (ASH)": round(avg_active, 2),
             "Tx Cost (s)": round(tx_cost, 4),
             "Max Latency (s)": round(curr["max_duration"], 2),
-            "IO Waits": io_waits,
-            "Rows Inserted/s": round(d_inserted/duration, 0)
+            "IO Waits": io_waits
         }
 
-        # --- ДЕРЕВО РЕШЕНИЙ ---
+        # --- ДЕТЕКЦИЯ ---
         profile = "Unknown"
         confidence = "Low"
 
@@ -32,30 +31,27 @@ class ProfileAnalyzer:
             profile = "IDLE"
             confidence = "High"
         
-        elif d_inserted > 5000 and d_fetched < 100:
+        elif d_inserted > 2000 and d_fetched < 100:
             profile = "Bulk Load"
             confidence = "High"
 
-        elif tps > 50 and tx_cost < 0.05:
-            # Логика IoT закомментирована в твоем коде, можешь раскомментировать при желании
-            # if d_inserted > tps * 0.8: 
-            #    profile = "IoT / Ingestion"
-            # else:
+        elif tps > 20 and tx_cost < 0.05:
+        
             profile = "Classic OLTP"
             confidence = "High"
 
-        elif tx_cost > 0.5 or curr["max_duration"] > 2.0:
+        elif tx_cost > 0.3 or curr["max_duration"] > 1.0:
             if io_waits > 0:
-                profile = "Heavy OLAP (Disk Bound)"
+                profile = "Disk-Bound OLAP"
             else:
-                profile = "Heavy OLAP (CPU/Mem Bound)"
+                profile = "Heavy OLAP"
             confidence = "Medium"
             
             if tps > 10:
                 profile = "Mixed / HTAP"
                 confidence = "Medium"
 
-        elif read_write_ratio > 100 and tps > 5:
+        elif read_write_ratio > 50 and tps > 5:
             profile = "Web / Read-Only"
             confidence = "High"
             

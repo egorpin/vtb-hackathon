@@ -1,3 +1,3 @@
 psycopg2-binary
-colorama
-tabulate
+PyQt6
+matplotlib

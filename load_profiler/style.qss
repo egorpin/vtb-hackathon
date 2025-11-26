@@ -1,0 +1,120 @@
+/* === ОСНОВНОЕ ОКНО === */
+QMainWindow { 
+    background-color: #121212; 
+}
+
+/* === КАРТОЧКИ И ПАНЕЛИ === */
+QFrame#Card { 
+    background-color: #1e1e1e; 
+    border-radius: 12px; 
+    border: 1px solid #2c2c2c; 
+}
+
+QFrame#Sidebar {
+    background-color: #181818;
+    border-right: 1px solid #2c2c2c;
+}
+
+/* === ТЕКСТ И ШРИФТЫ === */
+QLabel { 
+    color: #e0e0e0; 
+    font-family: 'Segoe UI', sans-serif; 
+}
+
+QLabel#Title { 
+    font-size: 24px; 
+    font-weight: bold; 
+    color: #ffffff; 
+    padding-bottom: 10px;
+}
+
+QLabel#MetricValue { 
+    font-size: 20px; 
+    font-weight: bold; 
+    color: #00e5ff; 
+}
+
+/* === КНОПКИ УПРАВЛЕНИЯ === */
+QPushButton {
+    background-color: #2d2d2d;
+    color: white;
+    border: 1px solid #3d3d3d;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: left;
+    margin-bottom: 5px;
+}
+
+QPushButton:hover {
+    background-color: #3d3d3d;
+    border: 1px solid #505050;
+}
+
+QPushButton:pressed {
+    background-color: #505050;
+}
+
+/* Цветные кнопки (по ID) */
+QPushButton#BtnStartOLTP {
+    border-left: 4px solid #00c851; /* Green accent */
+}
+
+QPushButton#BtnStartOLAP {
+    border-left: 4px solid #ffbb33; /* Orange accent */
+}
+
+QPushButton#BtnStartIoT {
+    border-left: 4px solid #33b5e5; /* Blue accent */
+}
+
+QPushButton#BtnStop {
+    background-color: #cc0000;
+    border: none;
+    text-align: center;
+    margin-top: 20px;
+}
+QPushButton#BtnStop:hover {
+    background-color: #ff4444;
+}
+
+/* === ТАБЛИЦЫ === */
+QTableWidget { 
+    background-color: #1e1e1e; 
+    color: #e0e0e0; 
+    border: none; 
+    gridline-color: #333; 
+}
+
+QHeaderView::section { 
+    background-color: #252525; 
+    color: #aaaaaa; 
+    padding: 6px; 
+    border: none; 
+    font-weight: bold;
+}
+
+/* === ПОЛЯ ВВОДА И ТЕКСТА === */
+QTextEdit { 
+    background-color: #151515; 
+    color: #00ff99; 
+    border: 1px solid #333; 
+    border-radius: 6px; 
+    font-family: 'Consolas', monospace; 
+    padding: 5px;
+}
+
+/* === ПРОГРЕСС БАР === */
+QProgressBar { 
+    border: none; 
+    background-color: #2d2d2d; 
+    border-radius: 4px; 
+    height: 6px; 
+    text-align: center; 
+}
+
+QProgressBar::chunk { 
+    background-color: #007acc; 
+    border-radius: 4px; 
+}
