@@ -119,19 +119,19 @@ class VTBProfilerGUI:
 
         # Menu Group: Tests
         self._create_sidebar_label(sidebar, "BENCHMARK SUITE")
-        self._create_sidebar_btn(sidebar, "⚡  Classic OLTP", lambda: self.run_benchmark("Classic OLTP", "OLTP"))
-        self._create_sidebar_btn(sidebar, "📊  Heavy OLAP", lambda: self.run_benchmark("Heavy OLAP", "OLAP"))
-        self._create_sidebar_btn(sidebar, "📡  IoT Stream", lambda: self.run_benchmark("IoT / Ingestion", "IoT"))
-        self._create_sidebar_btn(sidebar, "🔄  Mixed / HTAP", lambda: self.run_benchmark("Mixed / HTAP", "Mixed"))
-        self._create_sidebar_btn(sidebar, "🏭  TPC-C Simulation", lambda: self.run_benchmark("TPC-C OLTP", "TPC-C"))
+        self._create_sidebar_btn(sidebar, "  Classic OLTP", lambda: self.run_benchmark("Classic OLTP", "OLTP"))
+        self._create_sidebar_btn(sidebar, "  Heavy OLAP", lambda: self.run_benchmark("Heavy OLAP", "OLAP"))
+        self._create_sidebar_btn(sidebar, "  IoT Stream", lambda: self.run_benchmark("IoT / Ingestion", "IoT"))
+        self._create_sidebar_btn(sidebar, "  Mixed / HTAP", lambda: self.run_benchmark("Mixed / HTAP", "Mixed"))
+        self._create_sidebar_btn(sidebar, "  TPC-C Simulation", lambda: self.run_benchmark("TPC-C OLTP", "TPC-C"))
 
         ttk.Separator(sidebar).pack(fill=tk.X, padx=20, pady=20)
 
         # Menu Group: Controls
         self._create_sidebar_label(sidebar, "SYSTEM CONTROLS")
-        self._create_sidebar_btn(sidebar, "🚀  Run Full Suite", self.run_full_test_suite)
-        self._create_sidebar_btn(sidebar, "📈  View Report", self.show_benchmark_report)
-        self._create_sidebar_btn(sidebar, "🧹  Cleanup Data", self.cleanup_failed_tests)
+        self._create_sidebar_btn(sidebar, "  Run Full Suite", self.run_full_test_suite)
+        self._create_sidebar_btn(sidebar, "  View Report", self.show_benchmark_report)
+        self._create_sidebar_btn(sidebar, "  Cleanup Data", self.cleanup_failed_tests)
 
         # Bottom Status in Sidebar
         status_frame = tk.Frame(sidebar, bg=COLOR_BG_SIDEBAR)
