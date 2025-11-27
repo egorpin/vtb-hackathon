@@ -1,44 +1,111 @@
-CREATE TABLE IF NOT EXISTS load_profiles (
-    id SERIAL PRIMARY KEY,
-    profile_name VARCHAR(50) UNIQUE NOT NULL,
-    description TEXT,
-    recommendations JSONB
-);
-
-CREATE TABLE IF NOT EXISTS benchmark_results (
-    id SERIAL PRIMARY KEY,
-    profile_name VARCHAR(50) NOT NULL,
-    test_type VARCHAR(20) NOT NULL,
-    tpm DECIMAL(10,2),
-    nopm DECIMAL(10,2),
-    avg_latency DECIMAL(10,4),
-    tps DECIMAL(10,2),
-    duration_minutes INTEGER,
-    clients INTEGER,  
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- Очистка старых данных (опционально, если нужно пересоздать)
+-- TRUNCATE TABLE load_profiles;
 
 INSERT INTO load_profiles (profile_name, description, recommendations) VALUES
-('IDLE', 'Система простаивает', '{}'),
 
-('Classic OLTP', 'Высокий TPS, короткие транзакции (Банкинг, Биллинг)',
- '{"checkpoint_timeout": "15min", "random_page_cost": "1.1", "shared_buffers": "25% RAM"}'),
+-- 1. Classic OLTP (Банкинг, биллинг, CRM)
+-- Упор на надежность транзакций (ACID), кэширование горячих данных и быстрые коммиты.
+('Classic OLTP', 
+ 'Высокая конкурентность, короткие транзакции, случайный доступ к данным.',
+ '{
+    "shared_buffers": "25% RAM",
+    "random_page_cost": "1.1",
+    "effective_io_concurrency": "200",
+    "wal_buffers": "16MB",
+    "checkpoint_completion_target": "0.9",
+    "synchronous_commit": "on"
+ }'),
 
-('Heavy OLAP', 'Сложные аналитические запросы, высокая нагрузка на CPU/RAM',
- '{"work_mem": "64MB", "max_parallel_workers": "4", "effective_cache_size": "75% RAM"}'),
+-- 2. Heavy OLAP (Сложная аналитика в памяти)
+-- Упор на процессор и память для сортировок и хеширования.
+('Heavy OLAP', 
+ 'Сложные агрегации, JOIN больших таблиц, нагрузка на CPU и RAM.',
+ '{
+    "work_mem": "64MB",
+    "maintenance_work_mem": "512MB",
+    "max_parallel_workers_per_gather": "4",
+    "effective_cache_size": "75% RAM",
+    "jit": "on",
+    "random_page_cost": "1.1"
+ }'),
 
-('Disk-Bound OLAP', 'Аналитика, упирающаяся в диск (IO Wait)',
- '{"work_mem": "128MB", "effective_io_concurrency": "200", "max_worker_processes": "8"}'),
+-- 3. Disk-Bound OLAP (Аналитика на медленных дисках или огромных объемах)
+-- Упор на оптимизацию чтения с диска и параллелизм.
+('Disk-Bound OLAP', 
+ 'Данные не помещаются в RAM, активное чтение с диска.',
+ '{
+    "work_mem": "128MB",
+    "effective_io_concurrency": "300",
+    "max_worker_processes": "8",
+    "max_parallel_workers": "8",
+    "random_page_cost": "1.5",
+    "seq_page_cost": "1.0"
+ }'),
 
-('IoT / Ingestion', 'Интенсивная запись (INSERT), мало чтений',
- '{"max_wal_size": "10GB", "synchronous_commit": "off", "checkpoint_timeout": "30min"}'),
+-- 4. Web / Read-Only (Каталоги, CMS, Блоги)
+-- Максимальная скорость чтения, минимальные блокировки, отложенная запись не страшно.
+('Web / Read-Only', 
+ 'Преобладает чтение (95%+), короткие запросы, редкие изменения.',
+ '{
+    "autovacuum_naptime": "5min",
+    "wal_level": "minimal",
+    "synchronous_commit": "off",
+    "default_transaction_isolation": "read committed",
+    "shared_buffers": "30% RAM"
+ }'),
 
-('Mixed / HTAP', 'Смешанная нагрузка (транзакции + отчеты)',
- '{"min_wal_size": "2GB", "maintenance_work_mem": "512MB"}'),
+-- 5. IoT / Ingestion (Логи, сенсоры, трекинг)
+-- Максимальная пропускная способность на запись (INSERT). Риск потери последних секунд данных допустим.
+('IoT / Ingestion', 
+ 'Потоковая вставка данных, минимум обновлений, Time-Series.',
+ '{
+    "synchronous_commit": "off",
+    "commit_delay": "1000",
+    "max_wal_size": "10GB",
+    "checkpoint_timeout": "30min",
+    "wal_writer_delay": "200ms",
+    "autovacuum_analyze_scale_factor": "0.05"
+ }'),
 
-('Web / Read-Only', 'Преобладает чтение данных (Каталоги, CMS)',
- '{"autovacuum_naptime": "1min", "wal_level": "minimal"}'),
+-- 6. Mixed / HTAP (Гибридная нагрузка)
+-- Баланс между OLTP и OLAP. Сложнее всего настраивать.
+('Mixed / HTAP', 
+ 'Транзакции и отчеты одновременно. Требуется баланс.',
+ '{
+    "shared_buffers": "40% RAM",
+    "work_mem": "32MB",
+    "min_wal_size": "2GB",
+    "max_wal_size": "8GB",
+    "random_page_cost": "1.25",
+    "effective_cache_size": "60% RAM"
+ }'),
 
-('Bulk Load', 'Массовая заливка данных (Миграция)',
- '{"fsync": "off (TEMPORARY!)", "autovacuum": "off", "full_page_writes": "off"}')
-ON CONFLICT (profile_name) DO NOTHING;
+-- 7. End of day Batch (Ночные расчеты, закрытие дня)
+-- Задача: прожевать огромный объем данных максимально быстро. Вакуум мешает.
+('End of day Batch', 
+ 'Пакетная обработка больших объемов, ETL, массовые UPDATE/INSERT.',
+ '{
+    "max_wal_size": "40GB",
+    "checkpoint_timeout": "60min",
+    "autovacuum": "off",
+    "full_page_writes": "off",
+    "synchronous_commit": "off",
+    "wal_buffers": "64MB"
+ }'),
+
+-- 8. Data Maintenance (Обслуживание: VACUUM FULL, REINDEX)
+-- Выделяем всю доступную память под служебные операции.
+('Data Maintenance', 
+ 'Реиндексация, очистка мусора, восстановление.',
+ '{
+    "maintenance_work_mem": "2GB",
+    "autovacuum_vacuum_cost_limit": "2000",
+    "vacuum_cost_delay": "0",
+    "max_parallel_maintenance_workers": "4",
+    "wal_level": "minimal"
+ }')
+
+ON CONFLICT (profile_name) 
+DO UPDATE SET 
+    description = EXCLUDED.description,
+    recommendations = EXCLUDED.recommendations;
