@@ -1,4 +1,3 @@
--- Создаем таблицу профилей
 CREATE TABLE IF NOT EXISTS load_profiles (
     id SERIAL PRIMARY KEY,
     profile_name VARCHAR(50) UNIQUE NOT NULL,
@@ -6,7 +5,6 @@ CREATE TABLE IF NOT EXISTS load_profiles (
     recommendations JSONB
 );
 
--- Создаем таблицу для результатов тестирования
 CREATE TABLE IF NOT EXISTS benchmark_results (
     id SERIAL PRIMARY KEY,
     profile_name VARCHAR(50) NOT NULL,
@@ -16,11 +14,10 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
     avg_latency DECIMAL(10,4),
     tps DECIMAL(10,2),
     duration_minutes INTEGER,
-    clients INTEGER,  -- ДОБАВЛЕН СТОЛБЕЦ
+    clients INTEGER,  
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Наполняем данными (8 профилей для максимального балла)
 INSERT INTO load_profiles (profile_name, description, recommendations) VALUES
 ('IDLE', 'Система простаивает', '{}'),
 

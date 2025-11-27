@@ -1,5 +1,5 @@
 import psycopg2
-from config import DB_CONFIG  # Импорт напрямую из config
+from config import DB_CONFIG
 
 def load_profiles_from_db():
     """Возвращает словарь: { 'ProfileName': {param: value} }"""
@@ -8,7 +8,6 @@ def load_profiles_from_db():
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
 
-        # Проверяем наличие таблицы
         cur.execute("SELECT to_regclass('public.load_profiles');")
         if not cur.fetchone()[0]:
             conn.close()

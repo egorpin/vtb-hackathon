@@ -19,23 +19,18 @@ class BenchmarkRunner:
         Это позволяет pgbench исполнять скрипт локально без сетевых задержек.
         """
         try:
-            # 1. Создаем локальный временный файл
-            # delete=False, чтобы файл не удалился до копирования (Windows/Linux compat)
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.sql') as tmp:
                 tmp.write(script_content)
                 tmp_path = tmp.name
 
-            # 2. Копируем файл в контейнер
-            # Путь внутри контейнера: /tmp/script_name
             docker_dest = f"{self.container_name}:/tmp/{script_name}"
             subprocess.run(["docker", "cp", tmp_path, docker_dest], check=True)
 
-            # 3. Удаляем локальный файл
             os.remove(tmp_path)
 
             return f"/tmp/{script_name}"
         except Exception as e:
-            print(f"❌ Error copying script to docker: {e}")
+            print(f" Error copying script to docker: {e}")
             return None
 
     def _run_pgbench_custom(self, script_path, duration, clients, threads, test_name):
@@ -47,40 +42,34 @@ class BenchmarkRunner:
             "pgbench",
             "-U", "user",
             "-d", "mydb",
-            "-T", str(duration),   # Время теста
-            "-c", str(clients),    # Количество клиентов
-            "-j", str(threads),    # Количество потоков (Multi-threading)
-            "-P", "5",             # Отчет каждые 5 сек
-            "-f", script_path,     # Путь к скрипту внутри контейнера
-            "-r"                   # Отчет по latency
+            "-T", str(duration),
+            "-c", str(clients),
+            "-j", str(threads),
+            "-P", "5",
+            "-f", script_path,
+            "-r"
         ]
 
         print(f"🔧 Running {test_name}: pgbench -c {clients} -j {threads} -T {duration} ...")
 
-        # Запускаем и захватываем вывод
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result
 
-    # ==========================================
-    # 1. OLTP Test (Classic / Web)
-    # ==========================================
     def run_oltp_test(self, profile_name, duration=30, clients=20):
         """
         Стандартный TPC-B подобный тест (чтение + запись в транзакции).
         Использует встроенный сценарий pgbench.
         """
         try:
-            print(f"🚀 Starting OLTP test for {profile_name}...")
+            print(f" Starting OLTP test for {profile_name}...")
 
-            # Инициализация данных (Scale 10 = ~150MB, достаточно для теста)
             self._initialize_pgbench(scale=10)
 
-            # Стандартный запуск без -f (использует встроенный tpcb-like)
             cmd = [
                 "docker", "exec", "-i", self.container_name,
                 "pgbench",
                 "-c", str(clients),
-                "-j", "4",               # 4 потока для агрессивной нагрузки
+                "-j", "4",
                 "-T", str(duration),
                 "-U", "user", "mydb",
                 "-r", "-P", "5"
@@ -92,18 +81,14 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # ==========================================
-    # 2. OLAP Test (Heavy Reads)
-    # ==========================================
     def run_olap_test(self, profile_name, duration=30):
         """
         Аналитическая нагрузка: сложные агрегации и JOIN'ы.
         """
         try:
-            print(f"🚀 Starting OLAP test for {profile_name}...")
-            self._create_olap_indexes() # Убедимся, что есть индексы, иначе будет слишком медленно
+            print(f" Starting OLAP test for {profile_name}...")
+            self._create_olap_indexes()
 
-            # Скрипт: 3 тяжелых запроса, выбираемых случайно
             sql_script = """
             \set r random(1, 3)
             \if :r = 1
@@ -124,8 +109,6 @@ class BenchmarkRunner:
 
             script_path = self._copy_script_to_container(sql_script, "olap.sql")
 
-            # Для OLAP много клиентов не нужно, важна сложность запроса
-            # Но ставим 4 клиента, чтобы нагрузить CPU
             result = self._run_pgbench_custom(script_path, duration, clients=4, threads=2, test_name="OLAP")
 
             return self._process_results(result.stdout, profile_name, "OLAP", duration, 4)
@@ -133,19 +116,14 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # ==========================================
-    # 3. IoT Test (High Velocity Inserts)
-    # ==========================================
     def run_iot_test(self, profile_name, duration=30):
         """
         IoT нагрузка: Максимально быстрая вставка мелких данных.
         """
         try:
-            print(f"🚀 Starting IoT test for {profile_name}...")
+            print(f" Starting IoT test for {profile_name}...")
             self._create_iot_tables()
 
-            # Скрипт: чистый INSERT
-            # Используем random() для генерации данных прямо в базе
             sql_script = """
             INSERT INTO iot_sensor_data (sensor_id, value, timestamp)
             VALUES (floor(random() * 1000)::int, random() * 100, NOW());
@@ -156,7 +134,6 @@ class BenchmarkRunner:
 
             script_path = self._copy_script_to_container(sql_script, "iot.sql")
 
-            # Для IoT нужно МНОГО клиентов, чтобы забить WAL
             clients = 30
             threads = 4
             result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="IoT")
@@ -166,18 +143,14 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # ==========================================
-    # 4. Mixed Test (Mixed / HTAP)
-    # ==========================================
     def run_mixed_test(self, profile_name, duration=30):
         """
         Смешанная нагрузка: Чтение (50%), Обновление (30%), Вставка (20%).
         """
         try:
-            print(f"🚀 Starting Mixed test for {profile_name}...")
+            print(f" Starting Mixed test for {profile_name}...")
             self._initialize_pgbench(scale=5)
 
-            # Используем логику pgbench для вероятностей
             sql_script = """
             \set r random(1, 100)
             \if :r <= 50
@@ -200,22 +173,17 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # ==========================================
-    # 5. TPC-C Test (Simulated via pgbench or HammerDB)
-    # ==========================================
     def run_tpcc_test(self, profile_name, duration=60):
         """
         Пытается запустить HammerDB. Если нет - мощная эмуляция через pgbench.
         """
         try:
-            print(f"🚀 Starting TPC-C test for {profile_name}...")
+            print(f" Starting TPC-C test for {profile_name}...")
 
-            # 1. Пробуем HammerDB
             check = subprocess.run(["docker", "ps", "-q", "-f", f"name={self.hammerdb_container}"], capture_output=True, text=True)
 
             if check.stdout.strip():
-                print("🔨 Using HammerDB container...")
-                # HammerDB требует времени, duration там обычно внутри TCL скрипта, здесь мы просто ждем
+                print(" Using HammerDB container...")
                 cmd = ["docker", "exec", self.hammerdb_container, "hammerdbcli", "auto", "/hammerdb/run_tpcc.tcl"]
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 tps, latency = self._parse_hammerdb_output(result.stdout)
@@ -226,8 +194,7 @@ class BenchmarkRunner:
                     'duration_minutes': round(duration/60, 2), 'clients': 4
                 }
             else:
-                # 2. Fallback: Эмуляция сложной транзакции "Payment" + "New Order" в pgbench
-                print("⚠️ HammerDB not found. Running TPC-C simulation via pgbench...")
+                print(" HammerDB not found. Running TPC-C simulation via pgbench...")
 
                 sql_script = """
                 BEGIN;
@@ -245,15 +212,12 @@ class BenchmarkRunner:
                 return self._process_results(res.stdout, profile_name, "TPC-C", duration, 10)
 
             self._save_results(results)
-            print(f"✅ TPC-C test completed: {results['tps']:.1f} TPS")
+            print(f" TPC-C test completed: {results['tps']:.1f} TPS")
             return results
 
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # ==========================================
-    # Вспомогательные методы
-    # ==========================================
 
     def _process_results(self, stdout, profile_name, test_type, duration, clients):
         """Парсинг вывода pgbench и сохранение в БД"""
@@ -271,21 +235,19 @@ class BenchmarkRunner:
         }
 
         self._save_results(results)
-        print(f"✅ {test_type} completed: {tps:.1f} TPS, {avg_latency:.2f}ms")
+        print(f" {test_type} completed: {tps:.1f} TPS, {avg_latency:.2f}ms")
         return results
 
     def _initialize_pgbench(self, scale=5):
         """Инициализация pgbench таблиц, если они пусты"""
         try:
-            # Проверяем, есть ли данные
             check_cmd = ["docker", "exec", "-i", self.container_name, "psql", "-U", "user", "-d", "mydb", "-tAc", "SELECT count(*) FROM pgbench_accounts"]
             res = subprocess.run(check_cmd, capture_output=True, text=True)
 
             if res.returncode == 0 and res.stdout.strip().isdigit() and int(res.stdout.strip()) > 0:
-                return # Данные есть
+                return
 
-            print(f"🔄 Initializing pgbench (Scale {scale})...")
-            # -i (init), -s (scale), --foreign-keys (для честности)
+            print(f" Initializing pgbench (Scale {scale})...")
             init_cmd = ["docker", "exec", "-i", self.container_name, "pgbench", "-i", "-s", str(scale), "--foreign-keys", "-U", "user", "mydb"]
             subprocess.run(init_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
@@ -353,7 +315,7 @@ class BenchmarkRunner:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"❌ DB Save Error: {e}")
+            print(f" DB Save Error: {e}")
 
     def cleanup_failed_tests(self):
         try:
@@ -381,5 +343,5 @@ class BenchmarkRunner:
 
     def _handle_error(self, e, profile):
         msg = f"Test failed: {str(e)}"
-        print(f"❌ {msg}")
+        print(f" {msg}")
         return {'error': msg, 'profile': profile}
