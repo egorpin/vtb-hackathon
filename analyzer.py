@@ -33,6 +33,7 @@ class ProfileAnalyzer:
             rw_ratio = 9999.0
 
         insert_ratio = d_inserted / d_writes if d_writes > 0 else 0.0
+        delete_ratio = d_deleted / d_writes if d_writes > 0 else 0.0
 
         io_waits = curr["waits"].get("IO", 0)
 
@@ -62,7 +63,11 @@ class ProfileAnalyzer:
         # - Высокой активностью (db_time_rate > 0.5)
         # - Нулевым TPS (tps < 0.5), т.к. VACUUM не является 'xact_commit'
         # - Нулевыми DML-операциями (d_writes < 10)
-        if tps < 0.5 and db_time_rate > 0.5 and d_writes < 10:
+        #print(tps, db_time_rate, d_writes, delete_ratio, insert_ratio, metrics)
+        #print(db_time_rate, delete_ratio, db_time_rate > 0.5, delete_ratio > 0.8)
+        #print(f"DEBUG: TPS={tps}, DB_TIME={db_time_rate}, WRITES={d_writes}")
+
+        if tps < 20.0 and db_time_rate > 0.1 and d_writes < 50:
             return "Data Maintenance", "High", metrics
 
         # ----------------------------------------------------

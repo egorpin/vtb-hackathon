@@ -258,14 +258,24 @@ class BenchmarkRunner:
     def run_maintenance_test(self, profile_name, duration=30):
         """
         Задачи обслуживания (Data Maintenance): VACUUM, ANALYZE.
-        Не использует pgbench, так как выполняет DDL/служебные команды.
+        Включает предварительное заполнение мусором для создания реальной нагрузки.
         """
         try:
             print(f" Starting Data Maintenance test for {profile_name}...")
             self._initialize_pgbench(scale=10) # Убедимся, что таблицы есть
+
+            # --- ДОБАВЛЕНО: Генерация мусора ---
+            print(" Generating dead tuples (Garbage) to force heavy VACUUM...")
+            # Обновляем 50% строк в самой большой таблице.
+            # В MVCC это создает dead tuples, которые VACUUM должен будет вычистить,
+            # что вызовет нагрузку на CPU (db_time) и I/O, но без TPS (commits).
+            self._exec_sql("UPDATE pgbench_accounts SET abalance = abalance + 1 WHERE aid % 2 = 0;")
+            # -----------------------------------
+
             start_time = time.time()
 
             # Выполняем VACUUM/ANALYZE на основных таблицах
+            # Теперь, благодаря шагу выше, VACUUM будет действительно работать
             self._exec_sql("VACUUM ANALYZE pgbench_accounts;")
             self._exec_sql("VACUUM ANALYZE pgbench_branches;")
             self._exec_sql("VACUUM ANALYZE pgbench_tellers;")
