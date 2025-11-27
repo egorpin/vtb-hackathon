@@ -76,6 +76,9 @@ class SimpleVTBProfiler:
         ttk.Button(left_frame, text="🧪 Mixed Benchmark",
                   command=lambda: self.run_benchmark("Mixed / HTAP", "Mixed"),
                   width=20).pack(fill=tk.X, pady=2)
+        ttk.Button(left_frame, text="🏭 TPC-C Benchmark",
+          command=lambda: self.run_benchmark("TPC-C OLTP", "TPC-C"),
+          width=20).pack(fill=tk.X, pady=2)
 
         ttk.Separator(left_frame, orient='horizontal').pack(fill=tk.X, pady=15)
 
@@ -261,7 +264,8 @@ class SimpleVTBProfiler:
                 "OLTP": self.benchmark_runner.run_oltp_test,
                 "OLAP": self.benchmark_runner.run_olap_test,
                 "IoT": self.benchmark_runner.run_iot_test,
-                "Mixed": self.benchmark_runner.run_mixed_test
+                "Mixed": self.benchmark_runner.run_mixed_test,
+                "TPC-C": self.benchmark_runner.run_tpcc_test  # НОВЫЙ МЕТОД
             }
 
             method = test_methods.get(test_type)
