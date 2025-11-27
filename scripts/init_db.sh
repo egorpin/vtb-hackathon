@@ -5,8 +5,9 @@ set -e
 echo "Initializing PostgreSQL database for TPC testing..."
 
 # Wait for PostgreSQL to be ready
-for i in {1..30}; do
-  if psql -h postgres -U postgres -d tpc_tests -c '\q' 2>/dev/null; then
+for i in {1..5}; do
+  # Проверяем доступность сервера через подключение к стандартной базе "postgres"
+  if psql -h postgres -U postgres -d postgres -c '\q' 2>/dev/null; then
     echo "PostgreSQL is ready!"
     break
   fi
@@ -36,8 +37,8 @@ CREATE TABLE IF NOT EXISTS test_customers (
 );
 
 -- Generate some test data
-INSERT INTO test_customers (name, email) 
-SELECT 
+INSERT INTO test_customers (name, email)
+SELECT
     'Customer_' || i,
     'customer_' || i || '@test.com'
 FROM generate_series(1, 100) i;

@@ -1,5 +1,7 @@
 FROM python:3.11
 
+RUN apt-get update && apt-get install -y dos2unix \
+    && rm -rf /var/lib/apt/lists/*
 # Install PostgreSQL client and other tools
 RUN apt-get update && \
     apt-get install -y postgresql-client postgresql-contrib && \
