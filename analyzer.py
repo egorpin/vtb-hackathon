@@ -47,82 +47,39 @@ class ProfileAnalyzer:
             "Insert/Write Ratio": round(insert_ratio, 2)
         }
 
-        # ----------------------------------------------------
-        # 1. IDLE/LOW ACTIVITY
-        # ----------------------------------------------------
         if tps < 1.0 and db_time_rate < 0.5:
             return "IDLE", "High", metrics
 
         if db_time_rate < 0.1 and tps < 2:
             return "IDLE", "High", metrics
 
-        # ----------------------------------------------------
-        # 2. НОВЫЙ ПРОФИЛЬ: Data Maintenance (VACUUM, ANALYZE, REINDEX)
-        # ----------------------------------------------------
-        # Характеризуется:
-        # - Высокой активностью (db_time_rate > 0.5)
-        # - Нулевым TPS (tps < 0.5), т.к. VACUUM не является 'xact_commit'
-        # - Нулевыми DML-операциями (d_writes < 10)
-        #print(tps, db_time_rate, d_writes, delete_ratio, insert_ratio, metrics)
-        #print(db_time_rate, delete_ratio, db_time_rate > 0.5, delete_ratio > 0.8)
-        #print(f"DEBUG: TPS={tps}, DB_TIME={db_time_rate}, WRITES={d_writes}")
-
         if tps < 20.0 and db_time_rate > 0.1 and d_writes < 50:
             return "Data Maintenance", "High", metrics
 
-        # ----------------------------------------------------
-        # 3. WRITE-INTENSIVE LOADS (IoT)
-        # ----------------------------------------------------
-
-        # IoT / Ingestion: Высокий insert_ratio (80%+) с меньшим объемом записи, либо высокая TPS
         if d_writes > 50 and insert_ratio > 0.8:
             return "IoT / Ingestion", "High", metrics
 
-        # ----------------------------------------------------
-        # 4. READ-INTENSIVE & HEAVY LOADS (Web, OLAP, Batch)
-        # ----------------------------------------------------
-
         is_heavy_query = (tx_cost > 0.05) or (metrics["Max Latency (s)"] > 1.0)
 
-        # Web / Read-Only: Очень высокий коэффициент чтения (>100) И низкая стоимость транзакции (быстрые, кешированные запросы)
         if rw_ratio > 100 and tps > 10 and tx_cost < 0.015:
             return "Web / Read-Only", "High", metrics
 
-        # ----------------------------------------------------
-        # 4.1 НОВЫЙ ПРОФИЛЬ: End of day Batch (Тяжелые UPDATE/DELETE)
-        # ----------------------------------------------------
-        # Должен идти ПЕРЕД общим OLAP.
-        # Характеризуется:
-        # - Тяжелый запрос (is_heavy_query)
-        # - Низкий TPS (tps < 10)
-        # - Низкий Read/Write (rw_ratio < 5) - это НЕ чтение
-        # - Низкий Insert/Write (insert_ratio < 0.2) - это НЕ IoT
-        # (Это оставляет тяжелые UPDATE / DELETE)
         if is_heavy_query and rw_ratio < 5.0 and insert_ratio < 0.2 and tps < 10:
             return "End of day Batch", "High", metrics
 
-        # ----------------------------------------------------
-        # 4.2 Общая категория OLAP
-        # ----------------------------------------------------
         if (rw_ratio > 50) or (is_heavy_query and tps < 100):
             if tps < 5.0 and db_time_rate < 1.0:
                  return "IDLE", "Low", metrics
 
-            # Disk-Bound OLAP: Высокие задержки ввода/вывода (IO Waits) относительно ASH
             if io_waits > avg_active_sessions * 0.3:
                 return "Disk-Bound OLAP", "High", metrics
-            # Heavy OLAP: CPU/RAM-зависимый OLAP
             else:
                 return "Heavy OLAP", "High", metrics
 
-        # ----------------------------------------------------
-        # 5. MIXED / OLTP LOADS
-        # ----------------------------------------------------
         if 0.30 <= insert_ratio <= 0.65:
             return "Mixed / HTAP", "Medium", metrics
 
         if insert_ratio < 0.30 and tps > 10.0:
-            # Classic OLTP: Быстрые или сложные, но с низким insert_ratio
             return "Classic OLTP", "High", metrics
 
         if tps > 5:

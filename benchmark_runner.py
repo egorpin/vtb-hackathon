@@ -50,7 +50,7 @@ class BenchmarkRunner:
             "-r"
         ]
 
-        print(f"🔧 Running {test_name}: pgbench -c {clients} -j {threads} -T {duration} ...")
+        print(f" Running {test_name}: pgbench -c {clients} -j {threads} -T {duration} ...")
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result
@@ -124,7 +124,6 @@ class BenchmarkRunner:
             print(f" Starting Disk-Bound OLAP test for {profile_name}...")
             self._create_disk_bound_table()
 
-            # Сложный запрос с функцией, заставляющий делать последовательный скан
             sql_script = """
             -- Выполняем агрегацию по большому полю без индекса, чтобы убедиться в сканировании диска.
             SELECT count(*), max(random_data)
@@ -134,7 +133,7 @@ class BenchmarkRunner:
 
             script_path = self._copy_script_to_container(sql_script, "disk_olap.sql")
 
-            clients = 2 # Низкое число клиентов, чтобы тест был долгим
+            clients = 2
             threads = 1
             result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="DISK_OLAP")
 
@@ -213,7 +212,6 @@ class BenchmarkRunner:
             SELECT abalance, filler FROM pgbench_accounts WHERE aid = :aid;
             """
 
-            # Используем встроенный скрипт, но с высокой конкуренцией для проверки кеша
             script_path = self._copy_script_to_container(sql_script, "readonly.sql")
 
             clients = 50
@@ -225,14 +223,13 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # --- НОВЫЙ ПРОФИЛЬ: BATCH JOB ---
     def run_batch_test(self, profile_name, duration=30):
         """
         Пакетная обработка (Batch Job): тяжелые, редкие UPDATE/DELETE.
         """
         try:
             print(f" Starting End of day Batch test for {profile_name}...")
-            self._initialize_pgbench(scale=10) # Нужны данные для обновления
+            self._initialize_pgbench(scale=10)
 
             sql_script = """
             -- Имитация тяжелой пакетной задачи:
@@ -245,7 +242,7 @@ class BenchmarkRunner:
 
             script_path = self._copy_script_to_container(sql_script, "batch.sql")
 
-            clients = 2 # Пакетные задачи обычно имеют низкую конкуренцию
+            clients = 2
             threads = 1
             result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="BATCH_JOB")
 
@@ -254,7 +251,6 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
-    # --- НОВЫЙ ПРОФИЛЬ: MAINTENANCE ---
     def run_maintenance_test(self, profile_name, duration=30):
         """
         Задачи обслуживания (Data Maintenance): VACUUM, ANALYZE.
@@ -262,20 +258,13 @@ class BenchmarkRunner:
         """
         try:
             print(f" Starting Data Maintenance test for {profile_name}...")
-            self._initialize_pgbench(scale=10) # Убедимся, что таблицы есть
+            self._initialize_pgbench(scale=10)
 
-            # --- ДОБАВЛЕНО: Генерация мусора ---
             print(" Generating dead tuples (Garbage) to force heavy VACUUM...")
-            # Обновляем 50% строк в самой большой таблице.
-            # В MVCC это создает dead tuples, которые VACUUM должен будет вычистить,
-            # что вызовет нагрузку на CPU (db_time) и I/O, но без TPS (commits).
             self._exec_sql("UPDATE pgbench_accounts SET abalance = abalance + 1 WHERE aid % 2 = 0;")
-            # -----------------------------------
 
             start_time = time.time()
 
-            # Выполняем VACUUM/ANALYZE на основных таблицах
-            # Теперь, благодаря шагу выше, VACUUM будет действительно работать
             self._exec_sql("VACUUM ANALYZE pgbench_accounts;")
             self._exec_sql("VACUUM ANALYZE pgbench_branches;")
             self._exec_sql("VACUUM ANALYZE pgbench_tellers;")
@@ -285,15 +274,13 @@ class BenchmarkRunner:
 
             print(f" Maintenance completed in {actual_duration_ms:.2f}ms")
 
-            # Задачи обслуживания не имеют TPS.
-            # Возвращаем 0 TPS, но используем 'avg_latency' для фиксации времени выполнения.
             results = {
                 'profile': profile_name,
                 'test_type': 'MAINTENANCE',
                 'tps': 0.0,
                 'tpm': 0.0,
                 'avg_latency': round(actual_duration_ms, 2),
-                'duration_minutes': round(duration / 60, 2), # Фиксируем запрошенную длительность
+                'duration_minutes': round(duration / 60, 2),
                 'clients': 1,
                 'timestamp': datetime.now().isoformat()
             }
@@ -301,7 +288,6 @@ class BenchmarkRunner:
             return results
         except Exception as e:
             return self._handle_error(e, profile_name)
-    # --- КОНЕЦ НОВЫХ ПРОФИЛЕЙ ---
 
     def run_bulk_load_test(self, profile_name, duration=30):
         """
@@ -316,14 +302,12 @@ class BenchmarkRunner:
             SELECT i, md5(random()::text), now() FROM generate_series(1, 100) AS s(i);
             """
 
-            # Много клиентов, чтобы обеспечить высокую скорость записи
             script_path = self._copy_script_to_container(sql_script, "bulk_load.sql")
 
             clients = 40
             threads = 8
             result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="BULK_LOAD")
 
-            # Очистка таблицы
             self._exec_sql("TRUNCATE TABLE bulk_data;")
 
             return self._process_results(result.stdout, profile_name, "BULK_LOAD", duration, clients)
@@ -471,13 +455,11 @@ class BenchmarkRunner:
         tps = 0.0
         latency = 0.0
         for line in output.splitlines():
-            # tps = 1234.567890 (without initial connection time)
             if "tps =" in line:
                 try:
                     parts = line.split("=")
                     tps = float(parts[1].split()[0])
                 except: pass
-            # latency average = 1.234 ms
             if "latency average =" in line:
                 try:
                     parts = line.split("=")

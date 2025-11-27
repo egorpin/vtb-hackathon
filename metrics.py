@@ -42,8 +42,8 @@ class MetricsCollector:
             row = cur.fetchone()
             tup_inserted = float(row[0] or 0)
             tup_fetched = float(row[1] or 0)
-            tup_updated = float(row[2] or 0) # NEW
-            tup_deleted = float(row[3] or 0) # NEW
+            tup_updated = float(row[2] or 0)
+            tup_deleted = float(row[3] or 0) 
 
             cur.execute("""
                 SELECT wait_event_type, count(*)
@@ -70,6 +70,6 @@ class MetricsCollector:
             "tup_inserted": tup_inserted,
             "tup_fetched": tup_fetched,
             "tup_updated": tup_updated,
-            "tup_deleted": tup_deleted, 
+            "tup_deleted": tup_deleted,
             "max_duration": float(max_duration or 0)
         }
