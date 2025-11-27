@@ -51,11 +51,14 @@ class VTBProfilerGUI:
             messagebox.showerror("Critical Error", f"Database connection failed: {e}")
             sys.exit(1)
 
-        # Данные для графиков
+        # Данные для графиков (6 графиков)
         self.history_tps = deque([0]*60, maxlen=60)
         self.history_lat = deque([0]*60, maxlen=60)
         self.history_ash = deque([0]*60, maxlen=60)
         self.history_rwr = deque([0]*60, maxlen=60)
+        # НОВЫЕ ГРАФИКИ
+        self.history_max_lat = deque([0]*60, maxlen=60) # Для "Max Latency (s)"
+        self.history_iwr = deque([0]*60, maxlen=60)     # Для "Insert/Write Ratio"
 
         self.running = True
         self.setup_ui()
@@ -191,7 +194,8 @@ class VTBProfilerGUI:
         chart_container = tk.Frame(main_content, bg=COLOR_WHITE, padx=5, pady=5)
         chart_container.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
 
-        self.fig, ((self.ax1, self.ax2), (self.ax3, self.ax4)) = plt.subplots(2, 2, figsize=(10, 6))
+        # ИЗМЕНЕНИЕ: 2 строки, 3 столбца для 6 графиков
+        self.fig, ((self.ax1, self.ax2, self.ax3), (self.ax4, self.ax5, self.ax6)) = plt.subplots(2, 3, figsize=(10, 6))
         self.fig.patch.set_facecolor(COLOR_WHITE)
         plt.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9, wspace=0.2, hspace=0.4)
 
@@ -264,17 +268,24 @@ class VTBProfilerGUI:
             elif "OLAP" in profile: self.lbl_profile.config(fg=COLOR_DANGER)
             else: self.lbl_profile.config(fg=COLOR_VTB_BLUE_DARK)
 
-            # Charts Update
+            # Charts Update: добавление данных
             self.history_tps.append(metrics["TPS"])
             self.history_lat.append(metrics["Tx Cost (s)"])
             self.history_ash.append(metrics["Active Sessions (ASH)"])
             rwr_capped = min(metrics["Read/Write Ratio"], 100.0)
             self.history_rwr.append(rwr_capped)
+            # НОВЫЕ МЕТРИКИ
+            self.history_max_lat.append(metrics["Max Latency (s)"])
+            iwr_capped = min(metrics["Insert/Write Ratio"], 100.0)
+            self.history_iwr.append(iwr_capped)
 
+            # Отрисовка графиков: 6 вызовов
             self._draw_chart(self.ax1, self.history_tps, "TPS Trend", COLOR_SUCCESS)
-            self._draw_chart(self.ax2, self.history_lat, "Tx Latency", COLOR_DANGER)
+            self._draw_chart(self.ax2, self.history_lat, "Avg Tx Latency (s)", COLOR_DANGER)
             self._draw_chart(self.ax3, self.history_ash, "DB Load (ASH)", "#6F42C1")
             self._draw_chart(self.ax4, self.history_rwr, "Read/Write Ratio", COLOR_VTB_BLUE_LIGHT)
+            self._draw_chart(self.ax5, self.history_max_lat, "Max Tx Latency (s)", "#FFC107")
+            self._draw_chart(self.ax6, self.history_iwr, "Insert/Write Ratio", "#20C997")
 
             self.canvas.draw()
 
