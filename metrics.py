@@ -64,8 +64,14 @@ class MetricsCollector:
             waits = dict(cur.fetchall())
 
             # 6. Max Latency текущего момента
-            cur.execute("SELECT coalesce(max(extract(epoch from (now() - query_start))), 0) FROM pg_stat_activity WHERE state = 'active'")
+            cur.execute("""
+        SELECT coalesce(max(extract(epoch from (now() - query_start))), 0)
+        FROM pg_stat_activity
+        WHERE state = 'active'
+        AND pid <> pg_backend_pid()
+        """)
             max_duration = cur.fetchone()[0]
+            print(max_duration)
 
         return {
             "time": time.time(),
