@@ -42,6 +42,10 @@ class SimpleVTBProfiler:
 
         self.history_tps = deque([0]*60, maxlen=60)
         self.history_lat = deque([0]*60, maxlen=60)
+        # --- НОВЫЕ ОЧЕРЕДИ ИСТОРИИ ---
+        self.history_ash = deque([0]*60, maxlen=60)
+        self.history_rwr = deque([0]*60, maxlen=60)
+        # -----------------------------
         self.running = True
 
         self.setup_ui()
@@ -162,8 +166,9 @@ class SimpleVTBProfiler:
         chart_frame = ttk.LabelFrame(right_frame, text="Performance Metrics During Benchmarks", padding="10")
         chart_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # Create matplotlib figure
-        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(10, 6))
+        # Create matplotlib figure (2 rows, 2 columns for 4 charts)
+        self.fig, ((self.ax1, self.ax2), (self.ax3, self.ax4)) = plt.subplots(2, 2, figsize=(12, 8))
+        self.fig.tight_layout(pad=3.0) # Для лучшего отображения 4 графиков
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -186,6 +191,7 @@ class SimpleVTBProfiler:
         def update():
             if self.running:
                 self.update_stats()
+                # Используем ANALYSIS_INTERVAL из config.py
                 self.root.after(ANALYSIS_INTERVAL * 1000, update)
 
         self.root.after(1000, update)
@@ -193,10 +199,11 @@ class SimpleVTBProfiler:
     def update_stats(self):
         try:
             curr_snapshot = self.collector.get_snapshot()
+            # Используем ANALYSIS_INTERVAL для расчета дельт
             profile, conf, metrics = self.analyzer.analyze(self.prev_snapshot, curr_snapshot, ANALYSIS_INTERVAL)
             self.prev_snapshot = curr_snapshot
 
-            # Update UI
+            # Update UI (Cards)
             self.tps_var.set(f"{int(metrics['TPS'])}")
             self.latency_var.set(f"{metrics['Tx Cost (s)']:.4f}s")
             self.sessions_var.set(f"{metrics['Active Sessions (ASH)']}")
@@ -216,23 +223,48 @@ class SimpleVTBProfiler:
 
             self.profile_label.configure(foreground=color)
 
-            # Update Charts
+            # Update Charts (History)
             self.history_tps.append(metrics["TPS"])
             self.history_lat.append(metrics["Tx Cost (s)"])
+            # --- НОВЫЕ МЕТРИКИ ---
+            self.history_ash.append(metrics["Active Sessions (ASH)"])
+            # Примечание: Read/Write Ratio может быть очень большим, ограничиваем для графика
+            rwr_capped = min(metrics["Read/Write Ratio"], 100.0)
+            self.history_rwr.append(rwr_capped)
+            # --------------------
 
+            # Redraw ax1 (TPS)
             self.ax1.clear()
             self.ax1.plot(self.history_tps, color='green', linewidth=2, alpha=0.8)
             self.ax1.fill_between(range(len(self.history_tps)), self.history_tps, color='green', alpha=0.1)
-            self.ax1.set_title("Transactions Per Second (TPS)", fontsize=12)
+            self.ax1.set_title("Transactions Per Second (TPS)", fontsize=10)
             self.ax1.grid(True, linestyle=':', alpha=0.3)
             self.ax1.set_facecolor('#f8f9fa')
 
+            # Redraw ax2 (Latency)
             self.ax2.clear()
             self.ax2.plot(self.history_lat, color='red', linewidth=2, alpha=0.8)
             self.ax2.fill_between(range(len(self.history_lat)), self.history_lat, color='red', alpha=0.1)
-            self.ax2.set_title("Latency Cost (ASH/Commit)", fontsize=12)
+            self.ax2.set_title("Tx Cost (ASH/Commit)", fontsize=10)
             self.ax2.grid(True, linestyle=':', alpha=0.3)
             self.ax2.set_facecolor('#f8f9fa')
+
+            # --- НОВЫЙ ГРАФИК 1: Active Sessions (ASH) ---
+            self.ax3.clear()
+            self.ax3.plot(self.history_ash, color='purple', linewidth=2, alpha=0.8)
+            self.ax3.fill_between(range(len(self.history_ash)), self.history_ash, color='purple', alpha=0.1)
+            self.ax3.set_title("Active Sessions (AAS)", fontsize=10)
+            self.ax3.grid(True, linestyle=':', alpha=0.3)
+            self.ax3.set_facecolor('#f8f9fa')
+
+            # --- НОВЫЙ ГРАФИК 2: Read/Write Ratio ---
+            self.ax4.clear()
+            self.ax4.plot(self.history_rwr, color='blue', linewidth=2, alpha=0.8)
+            self.ax4.fill_between(range(len(self.history_rwr)), self.history_rwr, color='blue', alpha=0.1)
+            self.ax4.set_title("Read/Write Ratio (Capped at 100)", fontsize=10)
+            self.ax4.grid(True, linestyle=':', alpha=0.3)
+            self.ax4.set_facecolor('#f8f9fa')
+            # ---------------------------------------------
 
             self.canvas.draw()
 
@@ -242,6 +274,7 @@ class SimpleVTBProfiler:
                 if base_name in self.profiles_db:
                     data = self.profiles_db[base_name]
                     text = f"🤖 AI CONFIG RECOMMENDATIONS for {base_name}:\n\n"
+                    # Recommendations are stored in JSON format
                     for k, v in data.items():
                         text += f"• {k} = {v}\n"
 
@@ -450,6 +483,8 @@ class SimpleVTBProfiler:
         self.root.destroy()
 
 if __name__ == "__main__":
+    # Установите стиль Ttk, если хотите применить стили style.qss (требуется PyQt или Qt)
+    # Здесь используется чистый Tkinter, поэтому style.qss игнорируется, но код остается рабочим
     root = tk.Tk()
     app = SimpleVTBProfiler(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
