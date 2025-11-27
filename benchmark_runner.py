@@ -225,6 +225,74 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
+    # --- НОВЫЙ ПРОФИЛЬ: BATCH JOB ---
+    def run_batch_test(self, profile_name, duration=30):
+        """
+        Пакетная обработка (Batch Job): тяжелые, редкие UPDATE/DELETE.
+        """
+        try:
+            print(f" Starting End of day Batch test for {profile_name}...")
+            self._initialize_pgbench(scale=10) # Нужны данные для обновления
+
+            sql_script = """
+            -- Имитация тяжелой пакетной задачи:
+            -- Обновляем большое кол-во записей, вызывая IO и CPU
+            -- Обновляем 10% случайных веток
+            UPDATE pgbench_accounts
+            SET abalance = abalance - 100
+            WHERE bid IN (SELECT bid FROM pgbench_branches ORDER BY random() LIMIT (SELECT count(*) / 10 FROM pgbench_branches));
+            """
+
+            script_path = self._copy_script_to_container(sql_script, "batch.sql")
+
+            clients = 2 # Пакетные задачи обычно имеют низкую конкуренцию
+            threads = 1
+            result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="BATCH_JOB")
+
+            return self._process_results(result.stdout, profile_name, "BATCH_JOB", duration, clients)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
+    # --- НОВЫЙ ПРОФИЛЬ: MAINTENANCE ---
+    def run_maintenance_test(self, profile_name, duration=30):
+        """
+        Задачи обслуживания (Data Maintenance): VACUUM, ANALYZE.
+        Не использует pgbench, так как выполняет DDL/служебные команды.
+        """
+        try:
+            print(f" Starting Data Maintenance test for {profile_name}...")
+            self._initialize_pgbench(scale=10) # Убедимся, что таблицы есть
+            start_time = time.time()
+
+            # Выполняем VACUUM/ANALYZE на основных таблицах
+            self._exec_sql("VACUUM ANALYZE pgbench_accounts;")
+            self._exec_sql("VACUUM ANALYZE pgbench_branches;")
+            self._exec_sql("VACUUM ANALYZE pgbench_tellers;")
+
+            end_time = time.time()
+            actual_duration_ms = (end_time - start_time) * 1000
+
+            print(f" Maintenance completed in {actual_duration_ms:.2f}ms")
+
+            # Задачи обслуживания не имеют TPS.
+            # Возвращаем 0 TPS, но используем 'avg_latency' для фиксации времени выполнения.
+            results = {
+                'profile': profile_name,
+                'test_type': 'MAINTENANCE',
+                'tps': 0.0,
+                'tpm': 0.0,
+                'avg_latency': round(actual_duration_ms, 2),
+                'duration_minutes': round(duration / 60, 2), # Фиксируем запрошенную длительность
+                'clients': 1,
+                'timestamp': datetime.now().isoformat()
+            }
+            self._save_results(results)
+            return results
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+    # --- КОНЕЦ НОВЫХ ПРОФИЛЕЙ ---
+
     def run_bulk_load_test(self, profile_name, duration=30):
         """
         Массовая заливка данных (Bulk Load): интенсивные INSERT'ы, нагрузка на WAL/Checkpoints.

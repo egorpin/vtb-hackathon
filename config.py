@@ -1,4 +1,4 @@
-ANALYSIS_INTERVAL = 3
+ANALYSIS_INTERVAL = 2
 
 DB_CONFIG = {
     "dbname": "mydb",

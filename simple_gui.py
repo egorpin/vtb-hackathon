@@ -129,6 +129,12 @@ class VTBProfilerGUI:
         self._create_sidebar_btn(sidebar, "  Web / Read-Only", lambda: self.run_benchmark("Web / Read-Only", "READ_ONLY"))
         self._create_sidebar_btn(sidebar, "  IoT Stream", lambda: self.run_benchmark("IoT / Ingestion", "IoT"))
         self._create_sidebar_btn(sidebar, "  Mixed / HTAP", lambda: self.run_benchmark("Mixed / HTAP", "Mixed"))
+
+        # --- НОВЫЕ КНОПКИ ---
+        self._create_sidebar_btn(sidebar, "  End of day Batch", lambda: self.run_benchmark("End of day Batch", "BATCH_JOB"))
+        self._create_sidebar_btn(sidebar, "  Data Maintenance", lambda: self.run_benchmark("Data Maintenance", "MAINTENANCE"))
+        # --- КОНЕЦ НОВЫХ КНОПОК ---
+
         # Кнопки "Bulk Load" и "TPC-C Simulation" удалены
 
         ttk.Separator(sidebar).pack(fill=tk.X, padx=20, pady=20)
@@ -324,16 +330,20 @@ class VTBProfilerGUI:
         def run_test():
             self.progress_var.set(f"RUNNING: {test_type} ({profile_name})")
 
+            # --- ОБНОВЛЕННЫЙ СЛОВАРЬ ---
             test_methods = {
                 "OLTP": self.benchmark_runner.run_oltp_test,
                 "OLAP": self.benchmark_runner.run_olap_test,
                 "IoT": self.benchmark_runner.run_iot_test,
                 "Mixed": self.benchmark_runner.run_mixed_test,
-                # "TPC-C": self.benchmark_runner.run_tpcc_test, # Удален
                 "READ_ONLY": self.benchmark_runner.run_read_only_test,
-                # "BULK_LOAD": self.benchmark_runner.run_bulk_load_test, # Удален
-                "DISK_OLAP": self.benchmark_runner.run_disk_bound_olap_test
+                "DISK_OLAP": self.benchmark_runner.run_disk_bound_olap_test,
+                # --- НОВЫЕ МЕТОДЫ ---
+                "BATCH_JOB": self.benchmark_runner.run_batch_test,
+                "MAINTENANCE": self.benchmark_runner.run_maintenance_test
             }
+            # --- КОНЕЦ ОБНОВЛЕНИЯ ---
+
             method = test_methods.get(test_type)
             # Продолжительность по умолчанию теперь всегда 25 секунд
             duration = 25
