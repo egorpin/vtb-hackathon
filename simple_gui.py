@@ -177,8 +177,7 @@ class SimpleVTBProfiler:
                                        "Welcome! Use the benchmark controls to:\n"
                                        "• Run individual load tests (OLTP, OLAP, IoT, Mixed)\n"
                                        "• Execute full test suite for comprehensive comparison\n"
-                                       "• View detailed benchmark reports with performance analysis\n"
-                                       "• Get AI-powered configuration recommendations\n\n"
+                                       "• View detailed benchmark reports with performance analysis\n\n"
                                        "Click 'Run Full Test Suite' to start!")
         self.results_text.config(state=tk.DISABLED)
 
