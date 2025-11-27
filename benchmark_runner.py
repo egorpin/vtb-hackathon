@@ -1,6 +1,8 @@
 import subprocess
 import time
 import re
+import os
+import tempfile
 from datetime import datetime
 import psycopg2
 from config import DB_CONFIG
@@ -8,557 +10,376 @@ from config import DB_CONFIG
 class BenchmarkRunner:
     def __init__(self, db_config):
         self.db_config = db_config
+        self.container_name = "vtb_postgres"
+        self.hammerdb_container = "vtb_hammerdb"
 
-    def run_oltp_test(self, profile_name, duration=30, clients=8):
-        """Тестировщик для OLTP нагрузки"""
+    def _copy_script_to_container(self, script_content, script_name="test.sql"):
+        """
+        Создает временный файл со скриптом и копирует его в контейнер.
+        Это позволяет pgbench исполнять скрипт локально без сетевых задержек.
+        """
+        try:
+            # 1. Создаем локальный временный файл
+            # delete=False, чтобы файл не удалился до копирования (Windows/Linux compat)
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.sql') as tmp:
+                tmp.write(script_content)
+                tmp_path = tmp.name
+
+            # 2. Копируем файл в контейнер
+            # Путь внутри контейнера: /tmp/script_name
+            docker_dest = f"{self.container_name}:/tmp/{script_name}"
+            subprocess.run(["docker", "cp", tmp_path, docker_dest], check=True)
+
+            # 3. Удаляем локальный файл
+            os.remove(tmp_path)
+
+            return f"/tmp/{script_name}"
+        except Exception as e:
+            print(f"❌ Error copying script to docker: {e}")
+            return None
+
+    def _run_pgbench_custom(self, script_path, duration, clients, threads, test_name):
+        """
+        Запускает pgbench внутри контейнера с указанным скриптом.
+        """
+        cmd = [
+            "docker", "exec", "-i", self.container_name,
+            "pgbench",
+            "-U", "user",
+            "-d", "mydb",
+            "-T", str(duration),   # Время теста
+            "-c", str(clients),    # Количество клиентов
+            "-j", str(threads),    # Количество потоков (Multi-threading)
+            "-P", "5",             # Отчет каждые 5 сек
+            "-f", script_path,     # Путь к скрипту внутри контейнера
+            "-r"                   # Отчет по latency
+        ]
+
+        print(f"🔧 Running {test_name}: pgbench -c {clients} -j {threads} -T {duration} ...")
+
+        # Запускаем и захватываем вывод
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
+
+    # ==========================================
+    # 1. OLTP Test (Classic / Web)
+    # ==========================================
+    def run_oltp_test(self, profile_name, duration=30, clients=20):
+        """
+        Стандартный TPC-B подобный тест (чтение + запись в транзакции).
+        Использует встроенный сценарий pgbench.
+        """
         try:
             print(f"🚀 Starting OLTP test for {profile_name}...")
 
-            # Принудительная инициализация pgbench
+            # Инициализация данных (Scale 10 = ~150MB, достаточно для теста)
             self._initialize_pgbench(scale=10)
 
-            # Запуск OLTP теста
-            run_cmd = [
-                "docker", "exec", "-i", "vtb_postgres",
-                "pgbench", "-c", str(clients), "-j", "2", "-T", str(duration),
-                "-U", "user", "mydb", "-r", "-P", "2"
-            ]
-
-            print(f"🔧 Running: {' '.join(run_cmd)}")
-            result = subprocess.run(run_cmd, capture_output=True, text=True)
-
-            # Парсим результаты
-            tps, avg_latency = self._parse_pgbench_output(result.stdout)
-            tpm = tps * 60
-
-            results = {
-                'profile': profile_name,
-                'test_type': 'OLTP',
-                'tps': round(tps, 2),
-                'tpm': round(tpm, 2),
-                'avg_latency': round(avg_latency, 2),
-                'duration_minutes': round(duration / 60, 2),
-                'clients': clients,
-                'timestamp': datetime.now().isoformat()
-            }
-
-            self._save_results(results)
-            print(f"✅ OLTP test completed: {tps:.1f} TPS, {avg_latency:.2f}ms latency")
-            return results
-
-        except Exception as e:
-            error_msg = f"OLTP test failed: {str(e)}"
-            print(f"❌ {error_msg}")
-            return {'error': error_msg, 'profile': profile_name}
-
-    def run_olap_test(self, profile_name, duration=30):
-        """Тестировщик для OLAP нагрузки - аналитические запросы"""
-        try:
-            print(f"🚀 Starting OLAP test for {profile_name}...")
-
-            # Создаем тестовые данные для аналитики
-            self._create_olap_test_data()
-
-            container = "vtb_postgres"
-            heavy_queries = [
-                # Тяжелый аналитический запрос 1
-                """
-                SELECT bid, count(*) as account_count, avg(abalance) as avg_balance,
-                       sum(abalance) as total_balance
-                FROM pgbench_accounts
-                GROUP BY bid
-                ORDER BY total_balance DESC;
-                """,
-                # Тяжелый аналитический запрос 2
-                """
-                SELECT a.aid, b.bbalance, t.tbalance, a.abalance,
-                       (a.abalance + b.bbalance + t.tbalance) as total
-                FROM pgbench_accounts a
-                JOIN pgbench_branches b ON a.bid = b.bid
-                JOIN pgbench_tellers t ON a.bid = t.bid
-                WHERE a.abalance > 0
-                ORDER BY total DESC
-                LIMIT 1000;
-                """,
-                # Тяжелый аналитический запрос 3
-                """
-                WITH account_stats AS (
-                    SELECT bid,
-                           count(*) as cnt,
-                           avg(abalance) as avg_bal,
-                           stddev(abalance) as std_bal
-                    FROM pgbench_accounts
-                    GROUP BY bid
-                )
-                SELECT b.bid, b.bbalance, a.cnt, a.avg_bal, a.std_bal
-                FROM pgbench_branches b
-                JOIN account_stats a ON b.bid = a.bid
-                ORDER BY a.avg_bal DESC;
-                """
-            ]
-
-            start_time = time.time()
-            completed_queries = 0
-            total_latency = 0.0
-
-            while time.time() - start_time < duration:
-                for i, query in enumerate(heavy_queries):
-                    if time.time() - start_time >= duration:
-                        break
-
-                    cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
-
-                    query_start = time.time()
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    query_latency = (time.time() - query_start) * 1000  # в ms
-
-                    if result.returncode == 0:
-                        completed_queries += 1
-                        total_latency += query_latency
-                    else:
-                        print(f"Query {i+1} failed: {result.stderr}")
-
-                    # Пауза между запросами
-                    time.sleep(0.5)
-
-            actual_duration = time.time() - start_time
-            qps = completed_queries / actual_duration if actual_duration > 0 else 0
-            avg_latency = total_latency / completed_queries if completed_queries > 0 else 0
-
-            results = {
-                'profile': profile_name,
-                'test_type': 'OLAP',
-                'tps': round(qps, 2),  # Queries per second
-                'tpm': round(qps * 60, 2),
-                'avg_latency': round(avg_latency, 2),
-                'duration_minutes': round(actual_duration / 60, 2),
-                'clients': 1,  # OLAP обычно single-threaded
-                'timestamp': datetime.now().isoformat()
-            }
-
-            self._save_results(results)
-            print(f"✅ OLAP test completed: {qps:.1f} QPS, {avg_latency:.2f}ms latency")
-            return results
-
-        except Exception as e:
-            error_msg = f"OLAP test failed: {str(e)}"
-            print(f"❌ {error_msg}")
-            return {'error': error_msg, 'profile': profile_name}
-
-    def run_iot_test(self, profile_name, duration=30):
-        """Тестировщик для IoT нагрузки - интенсивная запись"""
-        try:
-            print(f"🚀 Starting IoT test for {profile_name}...")
-
-            # Создаем таблицу для IoT тестов если нужно
-            self._create_iot_test_table()
-
-            container = "vtb_postgres"
-
-            # Оптимизированные запросы для IoT
-            insert_queries = [
-                # Быстрая вставка 1
-                """
-                INSERT INTO iot_sensor_data
-                (sensor_id, value, timestamp)
-                VALUES (
-                    floor(random() * 1000)::int,
-                    random() * 100,
-                    NOW() - (random() * interval '1 day')
-                );
-                """,
-                # Быстрая вставка 2
-                """
-                INSERT INTO iot_metrics
-                (device_id, metric_type, value, recorded_at)
-                VALUES (
-                    floor(random() * 100)::int,
-                    floor(random() * 10)::int,
-                    random() * 1000,
-                    NOW()
-                );
-                """
-            ]
-
-            start_time = time.time()
-            completed_inserts = 0
-            total_latency = 0.0
-
-            while time.time() - start_time < duration:
-                for i, query in enumerate(insert_queries):
-                    if time.time() - start_time >= duration:
-                        break
-
-                    cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
-
-                    insert_start = time.time()
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    insert_latency = (time.time() - insert_start) * 1000  # в ms
-
-                    if result.returncode == 0:
-                        completed_inserts += 1
-                        total_latency += insert_latency
-                    else:
-                        print(f"Insert {i+1} failed: {result.stderr}")
-
-                    # Минимальная пауза для максимальной производительности
-                    time.sleep(0.01)
-
-            actual_duration = time.time() - start_time
-            ips = completed_inserts / actual_duration if actual_duration > 0 else 0
-            avg_latency = total_latency / completed_inserts if completed_inserts > 0 else 0
-
-            results = {
-                'profile': profile_name,
-                'test_type': 'IoT',
-                'tps': round(ips, 2),  # Inserts per second
-                'tpm': round(ips * 60, 2),
-                'avg_latency': round(avg_latency, 2),
-                'duration_minutes': round(actual_duration / 60, 2),
-                'clients': 1,
-                'timestamp': datetime.now().isoformat()
-            }
-
-            self._save_results(results)
-            print(f"✅ IoT test completed: {ips:.1f} IPS, {avg_latency:.2f}ms latency")
-            return results
-
-        except Exception as e:
-            error_msg = f"IoT test failed: {str(e)}"
-            print(f"❌ {error_msg}")
-            return {'error': error_msg, 'profile': profile_name}
-
-    def run_mixed_test(self, profile_name, duration=30):
-        """Тестировщик для смешанной нагрузки"""
-        try:
-            print(f"🚀 Starting Mixed test for {profile_name}...")
-
-            # Инициализация для mixed теста
-            self._initialize_pgbench(scale=5)
-
-            container = "vtb_postgres"
-
-            # Смешанные запросы: чтение + запись + аналитика
-            mixed_queries = [
-                # OLTP-like: короткие транзакции
-                "UPDATE pgbench_accounts SET abalance = abalance + 1 WHERE aid = 1;",
-                # OLAP-like: аналитические запросы
-                "SELECT count(*), avg(abalance) FROM pgbench_accounts WHERE bid = 1;",
-                # IoT-like: вставки
-                "INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (1, 1, 1, 1, NOW());",
-                # Чтение
-                "SELECT abalance FROM pgbench_accounts WHERE aid = 1;"
-            ]
-
-            start_time = time.time()
-            completed_operations = 0
-            total_latency = 0.0
-
-            while time.time() - start_time < duration:
-                for i, query in enumerate(mixed_queries):
-                    if time.time() - start_time >= duration:
-                        break
-
-                    cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
-
-                    op_start = time.time()
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    op_latency = (time.time() - op_start) * 1000  # в ms
-
-                    if result.returncode == 0:
-                        completed_operations += 1
-                        total_latency += op_latency
-                    else:
-                        print(f"Operation {i+1} failed: {result.stderr}")
-
-                    time.sleep(0.1)
-
-            actual_duration = time.time() - start_time
-            ops = completed_operations / actual_duration if actual_duration > 0 else 0
-            avg_latency = total_latency / completed_operations if completed_operations > 0 else 0
-
-            results = {
-                'profile': profile_name,
-                'test_type': 'Mixed',
-                'tps': round(ops, 2),  # Operations per second
-                'tpm': round(ops * 60, 2),
-                'avg_latency': round(avg_latency, 2),
-                'duration_minutes': round(actual_duration / 60, 2),
-                'clients': 1,
-                'timestamp': datetime.now().isoformat()
-            }
-
-            self._save_results(results)
-            print(f"✅ Mixed test completed: {ops:.1f} OPS, {avg_latency:.2f}ms latency")
-            return results
-
-        except Exception as e:
-            error_msg = f"Mixed test failed: {str(e)}"
-            print(f"❌ {error_msg}")
-            return {'error': error_msg, 'profile': profile_name}
-
-    def run_tpcc_test(self, profile_name, duration=30):
-        """Запуск TPC-C теста через HammerDB"""
-        try:
-            print(f"🚀 Starting TPC-C test for {profile_name}...")
-
-            # Конвертируем секунды в минуты для HammerDB
-            duration_minutes = max(1, duration // 60)  # Минимум 1 минута
-
-            # Запуск HammerDB скрипта
+            # Стандартный запуск без -f (использует встроенный tpcb-like)
             cmd = [
-                "docker", "exec", "vtb_hammerdb",
-                "hammerdbcli", "auto", "/hammerdb/run_tpcc.tcl"
+                "docker", "exec", "-i", self.container_name,
+                "pgbench",
+                "-c", str(clients),
+                "-j", "4",               # 4 потока для агрессивной нагрузки
+                "-T", str(duration),
+                "-U", "user", "mydb",
+                "-r", "-P", "5"
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
-            print("TPC-C output:", result.stdout)
+            return self._process_results(result.stdout, profile_name, "OLTP", duration, clients)
 
-            # Парсинг результатов из вывода HammerDB
-            tps, latency = self._parse_tpcc_output(result.stdout)
+        except Exception as e:
+            return self._handle_error(e, profile_name)
 
-            results = {
-                'profile': profile_name,
-                'test_type': 'TPC-C',
-                'tps': tps,
-                'tpm': tps * 60,
-                'avg_latency': latency,
-                'duration_minutes': duration_minutes,
-                'clients': 4,
-                'timestamp': datetime.now().isoformat()
-            }
+    # ==========================================
+    # 2. OLAP Test (Heavy Reads)
+    # ==========================================
+    def run_olap_test(self, profile_name, duration=30):
+        """
+        Аналитическая нагрузка: сложные агрегации и JOIN'ы.
+        """
+        try:
+            print(f"🚀 Starting OLAP test for {profile_name}...")
+            self._create_olap_indexes() # Убедимся, что есть индексы, иначе будет слишком медленно
+
+            # Скрипт: 3 тяжелых запроса, выбираемых случайно
+            sql_script = """
+            \set r random(1, 3)
+            \if :r = 1
+                -- Агрегация по всем счетам
+                SELECT bid, count(*), avg(abalance) FROM pgbench_accounts GROUP BY bid;
+            \elif :r = 2
+                -- JOIN трех таблиц
+                SELECT a.aid, b.bbalance, t.tbalance
+                FROM pgbench_accounts a
+                JOIN pgbench_branches b ON a.bid = b.bid
+                JOIN pgbench_tellers t ON a.bid = t.bid
+                WHERE a.abalance > 0 LIMIT 100;
+            \else
+                -- Оконные функции (если версия PG позволяет, иначе простой count)
+                SELECT bid, sum(abalance) FROM pgbench_accounts GROUP BY bid ORDER BY sum(abalance) DESC LIMIT 5;
+            \endif
+            """
+
+            script_path = self._copy_script_to_container(sql_script, "olap.sql")
+
+            # Для OLAP много клиентов не нужно, важна сложность запроса
+            # Но ставим 4 клиента, чтобы нагрузить CPU
+            result = self._run_pgbench_custom(script_path, duration, clients=4, threads=2, test_name="OLAP")
+
+            return self._process_results(result.stdout, profile_name, "OLAP", duration, 4)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
+    # ==========================================
+    # 3. IoT Test (High Velocity Inserts)
+    # ==========================================
+    def run_iot_test(self, profile_name, duration=30):
+        """
+        IoT нагрузка: Максимально быстрая вставка мелких данных.
+        """
+        try:
+            print(f"🚀 Starting IoT test for {profile_name}...")
+            self._create_iot_tables()
+
+            # Скрипт: чистый INSERT
+            # Используем random() для генерации данных прямо в базе
+            sql_script = """
+            INSERT INTO iot_sensor_data (sensor_id, value, timestamp)
+            VALUES (floor(random() * 1000)::int, random() * 100, NOW());
+
+            INSERT INTO iot_metrics (device_id, metric_type, value, recorded_at)
+            VALUES (floor(random() * 100)::int, 1, random() * 500, NOW());
+            """
+
+            script_path = self._copy_script_to_container(sql_script, "iot.sql")
+
+            # Для IoT нужно МНОГО клиентов, чтобы забить WAL
+            clients = 30
+            threads = 4
+            result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="IoT")
+
+            return self._process_results(result.stdout, profile_name, "IoT", duration, clients)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
+    # ==========================================
+    # 4. Mixed Test (Mixed / HTAP)
+    # ==========================================
+    def run_mixed_test(self, profile_name, duration=30):
+        """
+        Смешанная нагрузка: Чтение (50%), Обновление (30%), Вставка (20%).
+        """
+        try:
+            print(f"🚀 Starting Mixed test for {profile_name}...")
+            self._initialize_pgbench(scale=5)
+
+            # Используем логику pgbench для вероятностей
+            sql_script = """
+            \set r random(1, 100)
+            \if :r <= 50
+                -- 50% Read
+                SELECT abalance FROM pgbench_accounts WHERE aid = :r;
+            \elif :r <= 80
+                -- 30% Update
+                UPDATE pgbench_accounts SET abalance = abalance + 1 WHERE aid = :r;
+            \else
+                -- 20% Insert
+                INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (1, 1, 1, 1, NOW());
+            \endif
+            """
+
+            script_path = self._copy_script_to_container(sql_script, "mixed.sql")
+            result = self._run_pgbench_custom(script_path, duration, clients=16, threads=4, test_name="Mixed")
+
+            return self._process_results(result.stdout, profile_name, "Mixed", duration, 16)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
+    # ==========================================
+    # 5. TPC-C Test (Simulated via pgbench or HammerDB)
+    # ==========================================
+    def run_tpcc_test(self, profile_name, duration=60):
+        """
+        Пытается запустить HammerDB. Если нет - мощная эмуляция через pgbench.
+        """
+        try:
+            print(f"🚀 Starting TPC-C test for {profile_name}...")
+
+            # 1. Пробуем HammerDB
+            check = subprocess.run(["docker", "ps", "-q", "-f", f"name={self.hammerdb_container}"], capture_output=True, text=True)
+
+            if check.stdout.strip():
+                print("🔨 Using HammerDB container...")
+                # HammerDB требует времени, duration там обычно внутри TCL скрипта, здесь мы просто ждем
+                cmd = ["docker", "exec", self.hammerdb_container, "hammerdbcli", "auto", "/hammerdb/run_tpcc.tcl"]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                tps, latency = self._parse_hammerdb_output(result.stdout)
+
+                results = {
+                    'profile': profile_name, 'test_type': 'TPC-C',
+                    'tps': tps, 'tpm': tps * 60, 'avg_latency': latency,
+                    'duration_minutes': round(duration/60, 2), 'clients': 4
+                }
+            else:
+                # 2. Fallback: Эмуляция сложной транзакции "Payment" + "New Order" в pgbench
+                print("⚠️ HammerDB not found. Running TPC-C simulation via pgbench...")
+
+                sql_script = """
+                BEGIN;
+                -- Payment Transaction Logic
+                UPDATE pgbench_branches SET bbalance = bbalance + 10 WHERE bid = :scale;
+                UPDATE pgbench_tellers SET tbalance = tbalance + 10 WHERE tid = :scale;
+                UPDATE pgbench_accounts SET abalance = abalance + 10 WHERE aid = :scale;
+                INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (1, 1, 1, 10, NOW());
+                -- New Order Check
+                SELECT abalance FROM pgbench_accounts WHERE aid = :scale;
+                COMMIT;
+                """
+                script_path = self._copy_script_to_container(sql_script, "tpcc_sim.sql")
+                res = self._run_pgbench_custom(script_path, duration, clients=10, threads=2, test_name="TPC-C (Sim)")
+                return self._process_results(res.stdout, profile_name, "TPC-C", duration, 10)
 
             self._save_results(results)
-            print(f"✅ TPC-C test completed: {tps:.1f} TPS, {latency:.2f}ms latency")
+            print(f"✅ TPC-C test completed: {results['tps']:.1f} TPS")
             return results
 
         except Exception as e:
-            error_msg = f"TPC-C test failed: {str(e)}"
-            print(f"❌ {error_msg}")
-            return {'error': error_msg, 'profile': profile_name}
+            return self._handle_error(e, profile_name)
 
-    def _parse_tpcc_output(self, output):
-        """Парсинг результатов TPC-C из вывода HammerDB"""
-        tps = 100.0  # Заглушка по умолчанию
-        latency = 50.0  # Заглушка по умолчанию
+    # ==========================================
+    # Вспомогательные методы
+    # ==========================================
 
-        # Базовый парсинг вывода HammerDB
-        for line in output.split('\n'):
-            if 'tpmC' in line:
-                # Пример: "tpmC: 1250.0"
-                try:
-                    tpm = float(re.search(r'tpmC\s*[:=]\s*(\d+\.?\d*)', line).group(1))
-                    tps = tpm / 60  # Конвертируем TPM в TPS
-                except (AttributeError, ValueError):
-                    pass
-            elif 'average latency' in line.lower():
-                # Пример: "average latency: 45.2 ms"
-                try:
-                    latency = float(re.search(r'(\d+\.?\d*)\s*ms', line.lower()).group(1))
-                except (AttributeError, ValueError):
-                    pass
+    def _process_results(self, stdout, profile_name, test_type, duration, clients):
+        """Парсинг вывода pgbench и сохранение в БД"""
+        tps, avg_latency = self._parse_pgbench_output(stdout)
 
-        return round(tps, 2), round(latency, 2)
+        results = {
+            'profile': profile_name,
+            'test_type': test_type,
+            'tps': round(tps, 2),
+            'tpm': round(tps * 60, 2),
+            'avg_latency': round(avg_latency, 2),
+            'duration_minutes': round(duration / 60, 2),
+            'clients': clients,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        self._save_results(results)
+        print(f"✅ {test_type} completed: {tps:.1f} TPS, {avg_latency:.2f}ms")
+        return results
 
     def _initialize_pgbench(self, scale=5):
-        """Надежная инициализация pgbench"""
+        """Инициализация pgbench таблиц, если они пусты"""
         try:
-            print("🔄 Initializing pgbench...")
+            # Проверяем, есть ли данные
+            check_cmd = ["docker", "exec", "-i", self.container_name, "psql", "-U", "user", "-d", "mydb", "-tAc", "SELECT count(*) FROM pgbench_accounts"]
+            res = subprocess.run(check_cmd, capture_output=True, text=True)
 
-            # Сначала проверяем, существует ли база
-            check_cmd = [
-                "docker", "exec", "-i", "vtb_postgres",
-                "psql", "-U", "user", "-d", "mydb", "-c", "SELECT 1;"
-            ]
-            subprocess.run(check_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0 and res.stdout.strip().isdigit() and int(res.stdout.strip()) > 0:
+                return # Данные есть
 
-            # Принудительно переинициализируем pgbench
-            init_cmd = [
-                "docker", "exec", "-i", "vtb_postgres",
-                "pgbench", "-i", "-s", str(scale), "-U", "user", "mydb"
-            ]
+            print(f"🔄 Initializing pgbench (Scale {scale})...")
+            # -i (init), -s (scale), --foreign-keys (для честности)
+            init_cmd = ["docker", "exec", "-i", self.container_name, "pgbench", "-i", "-s", str(scale), "--foreign-keys", "-U", "user", "mydb"]
+            subprocess.run(init_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
-            result = subprocess.run(init_cmd, capture_output=True, text=True)
+    def _create_iot_tables(self):
+        """Создает таблицы для IoT теста"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS iot_sensor_data (id SERIAL, sensor_id INT, value DECIMAL, timestamp TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS iot_metrics (id SERIAL, device_id INT, metric_type INT, value DECIMAL, recorded_at TIMESTAMP);
+        TRUNCATE TABLE iot_sensor_data; -- Очистка для чистоты теста
+        """
+        self._exec_sql(sql)
 
-            if result.returncode != 0:
-                if "already exists" not in result.stderr:
-                    print(f"⚠️  Init warning: {result.stderr}")
-                # Все равно продолжаем, т.к. таблицы могут существовать
-            else:
-                print("✅ Pgbench initialized successfully")
+    def _create_olap_indexes(self):
+        """Создает индексы для JOIN'ов"""
+        sql = "CREATE INDEX IF NOT EXISTS idx_pgbench_accounts_bid ON pgbench_accounts(bid);"
+        self._exec_sql(sql)
 
-        except Exception as e:
-            print(f"❌ Pgbench initialization failed: {e}")
-
-    def _create_olap_test_data(self):
-        """Создает дополнительные данные для OLAP тестов"""
-        try:
-            container = "vtb_postgres"
-
-            # Добавляем индексы для ускорения аналитических запросов
-            index_queries = [
-                "CREATE INDEX IF NOT EXISTS idx_accounts_bid ON pgbench_accounts(bid);",
-                "CREATE INDEX IF NOT EXISTS idx_accounts_balance ON pgbench_accounts(abalance);",
-                "CREATE INDEX IF NOT EXISTS idx_history_mtime ON pgbench_history(mtime);"
-            ]
-
-            for query in index_queries:
-                cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            print("✅ OLAP test data prepared")
-
-        except Exception as e:
-            print(f"❌ OLAP data preparation failed: {e}")
-
-    def _create_iot_test_table(self):
-        """Создает таблицы для IoT тестов"""
-        try:
-            container = "vtb_postgres"
-
-            create_tables = [
-                """
-                CREATE TABLE IF NOT EXISTS iot_sensor_data (
-                    id SERIAL PRIMARY KEY,
-                    sensor_id INTEGER,
-                    value DECIMAL(10,2),
-                    timestamp TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT NOW()
-                );
-                """,
-                """
-                CREATE TABLE IF NOT EXISTS iot_metrics (
-                    id SERIAL PRIMARY KEY,
-                    device_id INTEGER,
-                    metric_type INTEGER,
-                    value DECIMAL(10,2),
-                    recorded_at TIMESTAMP DEFAULT NOW()
-                );
-                """,
-                """
-                CREATE INDEX IF NOT EXISTS idx_sensor_timestamp ON iot_sensor_data(timestamp);
-                """,
-                """
-                CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON iot_metrics(recorded_at);
-                """
-            ]
-
-            for query in create_tables:
-                cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            print("✅ IoT test tables created")
-
-        except Exception as e:
-            print(f"❌ IoT table creation failed: {e}")
+    def _exec_sql(self, sql):
+        cmd = ["docker", "exec", "-i", self.container_name, "psql", "-U", "user", "-d", "mydb", "-c", sql]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _parse_pgbench_output(self, output):
-        """Парсит вывод pgbench"""
         tps = 0.0
-        avg_latency = 0.0
+        latency = 0.0
+        for line in output.splitlines():
+            # tps = 1234.567890 (without initial connection time)
+            if "tps =" in line:
+                try:
+                    parts = line.split("=")
+                    tps = float(parts[1].split()[0])
+                except: pass
+            # latency average = 1.234 ms
+            if "latency average =" in line:
+                try:
+                    parts = line.split("=")
+                    latency = float(parts[1].split()[0])
+                except: pass
+        return tps, latency
 
-        # Основные паттерны для TPS
-        tps_patterns = [
-            r'tps = (\d+\.\d+) \(without initial connection time\)',
-            r'tps = (\d+\.\d+) \(including connections establishing\)',
-            r'tps = (\d+\.\d+)',
-        ]
-
-        for pattern in tps_patterns:
-            match = re.search(pattern, output)
-            if match:
-                tps = float(match.group(1))
-                break
-
-        # Паттерны для latency
-        latency_patterns = [
-            r'latency average = (\d+\.\d+) ms',
-            r'avg latency\s*=\s*(\d+\.\d+) ms',
-        ]
-
-        for pattern in latency_patterns:
-            match = re.search(pattern, output)
-            if match:
-                avg_latency = float(match.group(1))
-                break
-
-        return tps, avg_latency
+    def _parse_hammerdb_output(self, output):
+        tps = 0.0
+        latency = 0.0
+        if "tpmC" in output:
+            try:
+                tpm = float(re.search(r'tpmC\s*[:=]\s*(\d+\.?\d*)', output).group(1))
+                tps = tpm / 60
+            except: pass
+        return tps, latency
 
     def _save_results(self, results):
-        """Сохраняет результаты в БД"""
         try:
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
-
             cur.execute("""
                 INSERT INTO benchmark_results
                 (profile_name, test_type, tpm, nopm, avg_latency, tps, duration_minutes, clients)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                results.get('profile'),
-                results.get('test_type'),
-                results.get('tpm', 0),
-                results.get('nopm', 0),
-                results.get('avg_latency', 0),
-                results.get('tps', 0),
-                results.get('duration_minutes', 0),
-                results.get('clients', 0)
+                results.get('profile'), results.get('test_type'), results.get('tpm', 0),
+                0, results.get('avg_latency', 0), results.get('tps', 0),
+                results.get('duration_minutes'), results.get('clients')
             ))
-
             conn.commit()
             conn.close()
-            print(f"💾 Results saved for {results.get('profile')}")
-
         except Exception as e:
-            print(f"❌ Error saving results: {e}")
-
-    def get_comparison_report(self):
-        """Генерирует отчет сравнения профилей"""
-        try:
-            conn = psycopg2.connect(**self.db_config)
-            cur = conn.cursor()
-
-            cur.execute("""
-                SELECT
-                    profile_name,
-                    test_type,
-                    ROUND(AVG(COALESCE(tps, 0)), 2) as avg_tps,
-                    ROUND(AVG(COALESCE(tpm, 0)), 2) as avg_tpm,
-                    ROUND(AVG(COALESCE(avg_latency, 0)), 4) as avg_latency,
-                    COUNT(*) as test_count
-                FROM benchmark_results
-                WHERE tps > 0
-                GROUP BY profile_name, test_type
-                ORDER BY avg_tps DESC
-            """)
-
-            results = cur.fetchall()
-            conn.close()
-
-            return results
-
-        except Exception as e:
-            print(f"❌ Error generating report: {e}")
-            return []
+            print(f"❌ DB Save Error: {e}")
 
     def cleanup_failed_tests(self):
-        """Удаляет записи тестов с ошибками"""
         try:
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
-
-            cur.execute("""
-                DELETE FROM benchmark_results
-                WHERE tps IS NULL OR tps <= 0
-            """)
-
-            deleted_count = cur.rowcount
+            cur.execute("DELETE FROM benchmark_results WHERE tps IS NULL OR tps <= 0")
+            count = cur.rowcount
             conn.commit()
             conn.close()
+            return count
+        except: return 0
 
-            print(f"🧹 Cleaned up {deleted_count} failed test records")
-            return deleted_count
+    def get_comparison_report(self):
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT profile_name, test_type, ROUND(AVG(tps), 2), ROUND(AVG(tpm), 2),
+                       ROUND(AVG(avg_latency), 4), COUNT(*)
+                FROM benchmark_results WHERE tps > 0
+                GROUP BY profile_name, test_type ORDER BY AVG(tps) DESC
+            """)
+            return cur.fetchall()
+        except: return []
 
-        except Exception as e:
-            print(f"❌ Error cleaning up failed tests: {e}")
-            return 0
+    def _handle_error(self, e, profile):
+        msg = f"Test failed: {str(e)}"
+        print(f"❌ {msg}")
+        return {'error': msg, 'profile': profile}
