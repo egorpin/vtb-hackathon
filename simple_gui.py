@@ -56,9 +56,8 @@ class VTBProfilerGUI:
         self.history_lat = deque([0]*60, maxlen=60)
         self.history_ash = deque([0]*60, maxlen=60)
         self.history_rwr = deque([0]*60, maxlen=60)
-        # НОВЫЕ ГРАФИКИ
-        self.history_max_lat = deque([0]*60, maxlen=60) # Для "Max Latency (s)"
-        self.history_iwr = deque([0]*60, maxlen=60)     # Для "Insert/Write Ratio"
+        self.history_max_lat = deque([0]*60, maxlen=60)
+        self.history_iwr = deque([0]*60, maxlen=60)
 
         self.running = True
         self.setup_ui()
@@ -122,10 +121,15 @@ class VTBProfilerGUI:
 
         # Menu Group: Tests
         self._create_sidebar_label(sidebar, "BENCHMARK SUITE")
+
+        # Добавленные кнопки
         self._create_sidebar_btn(sidebar, "  Classic OLTP", lambda: self.run_benchmark("Classic OLTP", "OLTP"))
         self._create_sidebar_btn(sidebar, "  Heavy OLAP", lambda: self.run_benchmark("Heavy OLAP", "OLAP"))
+        self._create_sidebar_btn(sidebar, "  Disk-Bound OLAP", lambda: self.run_benchmark("Disk-Bound OLAP", "DISK_OLAP")) # НОВЫЙ
+        self._create_sidebar_btn(sidebar, "  Web / Read-Only", lambda: self.run_benchmark("Web / Read-Only", "READ_ONLY")) # НОВЫЙ
         self._create_sidebar_btn(sidebar, "  IoT Stream", lambda: self.run_benchmark("IoT / Ingestion", "IoT"))
         self._create_sidebar_btn(sidebar, "  Mixed / HTAP", lambda: self.run_benchmark("Mixed / HTAP", "Mixed"))
+        self._create_sidebar_btn(sidebar, "  Bulk Load", lambda: self.run_benchmark("Bulk Load", "BULK_LOAD")) # НОВЫЙ
         self._create_sidebar_btn(sidebar, "  TPC-C Simulation", lambda: self.run_benchmark("TPC-C OLTP", "TPC-C"))
 
         ttk.Separator(sidebar).pack(fill=tk.X, padx=20, pady=20)
@@ -194,7 +198,7 @@ class VTBProfilerGUI:
         chart_container = tk.Frame(main_content, bg=COLOR_WHITE, padx=5, pady=5)
         chart_container.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
 
-        # ИЗМЕНЕНИЕ: 2 строки, 3 столбца для 6 графиков
+        # 6 графиков (2 строки, 3 столбца)
         self.fig, ((self.ax1, self.ax2, self.ax3), (self.ax4, self.ax5, self.ax6)) = plt.subplots(2, 3, figsize=(10, 6))
         self.fig.patch.set_facecolor(COLOR_WHITE)
         plt.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9, wspace=0.2, hspace=0.4)
@@ -274,7 +278,6 @@ class VTBProfilerGUI:
             self.history_ash.append(metrics["Active Sessions (ASH)"])
             rwr_capped = min(metrics["Read/Write Ratio"], 100.0)
             self.history_rwr.append(rwr_capped)
-            # НОВЫЕ МЕТРИКИ
             self.history_max_lat.append(metrics["Max Latency (s)"])
             iwr_capped = min(metrics["Insert/Write Ratio"], 100.0)
             self.history_iwr.append(iwr_capped)
@@ -327,7 +330,10 @@ class VTBProfilerGUI:
                 "OLAP": self.benchmark_runner.run_olap_test,
                 "IoT": self.benchmark_runner.run_iot_test,
                 "Mixed": self.benchmark_runner.run_mixed_test,
-                "TPC-C": self.benchmark_runner.run_tpcc_test
+                "TPC-C": self.benchmark_runner.run_tpcc_test,
+                "READ_ONLY": self.benchmark_runner.run_read_only_test, # НОВЫЙ
+                "BULK_LOAD": self.benchmark_runner.run_bulk_load_test, # НОВЫЙ
+                "DISK_OLAP": self.benchmark_runner.run_disk_bound_olap_test # НОВЫЙ
             }
             method = test_methods.get(test_type)
             duration = 120 if test_type == "TPC-C" else 25

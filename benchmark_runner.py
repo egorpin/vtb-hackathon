@@ -116,6 +116,33 @@ class BenchmarkRunner:
         except Exception as e:
             return self._handle_error(e, profile_name)
 
+    def run_disk_bound_olap_test(self, profile_name, duration=30):
+        """
+        Аналитическая нагрузка, упирающаяся в I/O: большие последовательные сканы.
+        """
+        try:
+            print(f" Starting Disk-Bound OLAP test for {profile_name}...")
+            self._create_disk_bound_table()
+
+            # Сложный запрос с функцией, заставляющий делать последовательный скан
+            sql_script = """
+            -- Выполняем агрегацию по большому полю без индекса, чтобы убедиться в сканировании диска.
+            SELECT count(*), max(random_data)
+            FROM disk_bound_data
+            WHERE random_data LIKE 'A%';
+            """
+
+            script_path = self._copy_script_to_container(sql_script, "disk_olap.sql")
+
+            clients = 2 # Низкое число клиентов, чтобы тест был долгим
+            threads = 1
+            result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="DISK_OLAP")
+
+            return self._process_results(result.stdout, profile_name, "DISK_OLAP", duration, clients)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
     def run_iot_test(self, profile_name, duration=30):
         """
         IoT нагрузка: Максимально быстрая вставка мелких данных.
@@ -169,6 +196,59 @@ class BenchmarkRunner:
             result = self._run_pgbench_custom(script_path, duration, clients=16, threads=4, test_name="Mixed")
 
             return self._process_results(result.stdout, profile_name, "Mixed", duration, 16)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
+    def run_read_only_test(self, profile_name, duration=30):
+        """
+        Тест только для чтения (Web / Read-Only): высокая скорость извлечения данных.
+        """
+        try:
+            print(f" Starting Read-Only test for {profile_name}...")
+            self._initialize_pgbench(scale=10)
+
+            sql_script = """
+            -- Выбираем случайную запись, имитируя чтение страницы/объекта
+            SELECT abalance, filler FROM pgbench_accounts WHERE aid = :aid;
+            """
+
+            # Используем встроенный скрипт, но с высокой конкуренцией для проверки кеша
+            script_path = self._copy_script_to_container(sql_script, "readonly.sql")
+
+            clients = 50
+            threads = 8
+            result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="READ_ONLY")
+
+            return self._process_results(result.stdout, profile_name, "READ_ONLY", duration, clients)
+
+        except Exception as e:
+            return self._handle_error(e, profile_name)
+
+    def run_bulk_load_test(self, profile_name, duration=30):
+        """
+        Массовая заливка данных (Bulk Load): интенсивные INSERT'ы, нагрузка на WAL/Checkpoints.
+        """
+        try:
+            print(f" Starting Bulk Load test for {profile_name}...")
+            self._create_bulk_table()
+
+            sql_script = """
+            INSERT INTO bulk_data (col1, col2, col3)
+            SELECT i, md5(random()::text), now() FROM generate_series(1, 100) AS s(i);
+            """
+
+            # Много клиентов, чтобы обеспечить высокую скорость записи
+            script_path = self._copy_script_to_container(sql_script, "bulk_load.sql")
+
+            clients = 40
+            threads = 8
+            result = self._run_pgbench_custom(script_path, duration, clients, threads, test_name="BULK_LOAD")
+
+            # Очистка таблицы
+            self._exec_sql("TRUNCATE TABLE bulk_data;")
+
+            return self._process_results(result.stdout, profile_name, "BULK_LOAD", duration, clients)
 
         except Exception as e:
             return self._handle_error(e, profile_name)
@@ -266,6 +346,44 @@ class BenchmarkRunner:
         """Создает индексы для JOIN'ов"""
         sql = "CREATE INDEX IF NOT EXISTS idx_pgbench_accounts_bid ON pgbench_accounts(bid);"
         self._exec_sql(sql)
+
+    def _create_bulk_table(self):
+        """Создает таблицу для Bulk Load теста"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS bulk_data (
+            id BIGSERIAL PRIMARY KEY,
+            col1 INT,
+            col2 VARCHAR(32),
+            col3 TIMESTAMP
+        );
+        """
+        self._exec_sql(sql)
+
+    def _create_disk_bound_table(self):
+        """Создает большую таблицу без индексов для Disk-Bound OLAP теста"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS disk_bound_data (
+            id BIGSERIAL PRIMARY KEY,
+            random_data VARCHAR(100) DEFAULT md5(random()::text),
+            payload TEXT
+        );
+
+        -- Проверяем, если таблица пуста, заполняем ее (1М строк ~ 100MB)
+        DO $$
+        BEGIN
+            IF (SELECT count(*) FROM disk_bound_data) < 1000000 THEN
+                TRUNCATE TABLE disk_bound_data;
+                INSERT INTO disk_bound_data (payload)
+                SELECT repeat('X', 500)
+                FROM generate_series(1, 1000000);
+            END IF;
+        END
+        $$;
+
+        DROP INDEX IF EXISTS disk_bound_data_random_data_idx; -- Убираем возможный индекс
+        """
+        self._exec_sql(sql)
+
 
     def _exec_sql(self, sql):
         cmd = ["docker", "exec", "-i", self.container_name, "psql", "-U", "user", "-d", "mydb", "-c", sql]
