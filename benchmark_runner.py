@@ -149,69 +149,51 @@ class BenchmarkRunner:
         """Тестировщик для IoT нагрузки - интенсивная запись"""
         try:
             print(f"🚀 Starting IoT test for {profile_name}...")
-
-            # Создаем таблицу для IoT тестов если нужно
             self._create_iot_test_table()
-
             container = "vtb_postgres"
 
-            # Оптимизированные запросы для IoT
-            insert_queries = [
-                # Быстрая вставка 1
-                """
-                INSERT INTO iot_sensor_data
-                (sensor_id, value, timestamp)
-                VALUES (
-                    floor(random() * 1000)::int,
+            # Используем generate_series для генерации массовой вставки (BULK INSERT)
+            # Это создаст гораздо большую нагрузку на WAL и диск, чем построчные вставки
+            bulk_insert_query = """
+                INSERT INTO iot_sensor_data (sensor_id, value, timestamp)
+                SELECT
+                    (random() * 1000)::int,
                     random() * 100,
-                    NOW() - (random() * interval '1 day')
-                );
-                """,
-                # Быстрая вставка 2
-                """
-                INSERT INTO iot_metrics
-                (device_id, metric_type, value, recorded_at)
-                VALUES (
-                    floor(random() * 100)::int,
-                    floor(random() * 10)::int,
-                    random() * 1000,
                     NOW()
-                );
-                """
-            ]
+                FROM generate_series(1, 1000);
+            """
 
             start_time = time.time()
-            completed_inserts = 0
+            completed_batches = 0 # Считаем пачки по 1000 строк
             total_latency = 0.0
 
             while time.time() - start_time < duration:
-                for i, query in enumerate(insert_queries):
-                    if time.time() - start_time >= duration:
-                        break
+                cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", bulk_insert_query]
 
-                    cmd = ["docker", "exec", "-i", container, "psql", "-U", "user", "-d", "mydb", "-c", query]
+                insert_start = time.time()
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                insert_latency = (time.time() - insert_start) * 1000
 
-                    insert_start = time.time()
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    insert_latency = (time.time() - insert_start) * 1000  # в ms
+                if result.returncode == 0:
+                    completed_batches += 1
+                    total_latency += insert_latency
+                else:
+                    print(f"Batch insert failed: {result.stderr}")
+                    time.sleep(1) # Пауза при ошибке
 
-                    if result.returncode == 0:
-                        completed_inserts += 1
-                        total_latency += insert_latency
-                    else:
-                        print(f"Insert {i+1} failed: {result.stderr}")
-
-                    # Минимальная пауза для максимальной производительности
-                    time.sleep(0.01)
+                # Небольшая пауза, чтобы не убить базу полностью, но достаточная для нагрузки
+                time.sleep(0.1)
 
             actual_duration = time.time() - start_time
-            ips = completed_inserts / actual_duration if actual_duration > 0 else 0
-            avg_latency = total_latency / completed_inserts if completed_inserts > 0 else 0
+            # Считаем реальные вставленные строки
+            total_rows = completed_batches * 1000
+            ips = total_rows / actual_duration if actual_duration > 0 else 0
+            avg_latency = total_latency / completed_batches if completed_batches > 0 else 0
 
             results = {
                 'profile': profile_name,
                 'test_type': 'IoT',
-                'tps': round(ips, 2),  # Inserts per second
+                'tps': round(ips, 2),  # Rows per second
                 'tpm': round(ips * 60, 2),
                 'avg_latency': round(avg_latency, 2),
                 'duration_minutes': round(actual_duration / 60, 2),
@@ -220,7 +202,7 @@ class BenchmarkRunner:
             }
 
             self._save_results(results)
-            print(f"✅ IoT test completed: {ips:.1f} IPS, {avg_latency:.2f}ms latency")
+            print(f"✅ IoT test completed: {ips:.1f} Rows/sec, {avg_latency:.2f}ms per batch")
             return results
 
         except Exception as e:
