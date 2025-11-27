@@ -27,34 +27,30 @@ class MetricsCollector:
             rollbacks = float(row[1] or 0)
 
             # 2. DB Time (через pg_stat_statements если есть, иначе 0)
-            # total_exec_time - это чистое время выполнения запросов
             db_time_accumulated = 0.0
             try:
-                # Для PG < 13 используйте total_time, для PG >= 13 total_exec_time
-                cur.execute("""
-                    SELECT sum(total_exec_time)
-                    FROM pg_stat_statements
-                """)
+                cur.execute("SELECT sum(total_exec_time) FROM pg_stat_statements")
                 res = cur.fetchone()
                 if res and res[0]:
-                    db_time_accumulated = float(res[0]) / 1000.0 # перевод из мс в секунды
+                    db_time_accumulated = float(res[0]) / 1000.0
             except psycopg2.Error:
-                # Если таблицы нет, ставим 0, анализатор переключится на ASH
                 self.conn.rollback()
                 db_time_accumulated = 0.0
 
-            # 3. Активные сессии (ASH Snapshot) - мгновенный снимок
-            # Это fallback метрика для DB Time
+            # 3. Активные сессии
             cur.execute("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid()")
             active_sessions = int(cur.fetchone()[0])
 
-            # 4. Вставки vs Чтения (Rows)
-            cur.execute("SELECT sum(tup_inserted), sum(tup_fetched) FROM pg_stat_database")
+            # 4. Вставки vs Чтения vs ОБНОВЛЕНИЯ vs УДАЛЕНИЯ (Расширенный набор)
+            # Мы добавили tup_updated и tup_deleted
+            cur.execute("SELECT sum(tup_inserted), sum(tup_fetched), sum(tup_updated), sum(tup_deleted) FROM pg_stat_database")
             row = cur.fetchone()
             tup_inserted = float(row[0] or 0)
             tup_fetched = float(row[1] or 0)
+            tup_updated = float(row[2] or 0) # NEW
+            tup_deleted = float(row[3] or 0) # NEW
 
-            # 5. Ожидания (для диагностики узких мест)
+            # 5. Ожидания
             cur.execute("""
                 SELECT wait_event_type, count(*)
                 FROM pg_stat_activity
@@ -63,24 +59,24 @@ class MetricsCollector:
             """)
             waits = dict(cur.fetchall())
 
-            # 6. Max Latency текущего момента
+            # 6. Max Latency
             cur.execute("""
-        SELECT coalesce(max(extract(epoch from (now() - query_start))), 0)
-        FROM pg_stat_activity
-        WHERE state = 'active'
-        AND pid <> pg_backend_pid()
-        """)
+                SELECT coalesce(max(extract(epoch from (now() - query_start))), 0)
+                FROM pg_stat_activity
+                WHERE state = 'active' AND pid <> pg_backend_pid()
+            """)
             max_duration = cur.fetchone()[0]
-            print(max_duration)
 
         return {
             "time": time.time(),
             "commits": commits,
             "rollbacks": rollbacks,
-            "db_time_accumulated": db_time_accumulated, # Накопленное время (счетчик)
-            "active_sessions": active_sessions,         # Мгновенное значение
+            "db_time_accumulated": db_time_accumulated,
+            "active_sessions": active_sessions,
             "waits": waits,
             "tup_inserted": tup_inserted,
             "tup_fetched": tup_fetched,
+            "tup_updated": tup_updated, # NEW
+            "tup_deleted": tup_deleted, # NEW
             "max_duration": float(max_duration or 0)
         }
