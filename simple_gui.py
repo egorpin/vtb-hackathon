@@ -77,8 +77,8 @@ class SimpleVTBProfiler:
                   command=lambda: self.run_benchmark("Mixed / HTAP", "Mixed"),
                   width=20).pack(fill=tk.X, pady=2)
         ttk.Button(left_frame, text="🏭 TPC-C Benchmark",
-          command=lambda: self.run_benchmark("TPC-C OLTP", "TPC-C"),
-          width=20).pack(fill=tk.X, pady=2)
+                  command=lambda: self.run_benchmark("TPC-C OLTP", "TPC-C"),
+                  width=20).pack(fill=tk.X, pady=2)
 
         ttk.Separator(left_frame, orient='horizontal').pack(fill=tk.X, pady=15)
 
@@ -175,9 +175,10 @@ class SimpleVTBProfiler:
         self.results_text.pack(fill=tk.BOTH, expand=True)
         self.results_text.insert(tk.END, "=== VTB LOAD PROFILER - BENCHMARK SYSTEM ===\n\n"
                                        "Welcome! Use the benchmark controls to:\n"
-                                       "• Run individual load tests (OLTP, OLAP, IoT, Mixed)\n"
+                                       "• Run individual load tests (OLTP, OLAP, IoT, Mixed, TPC-C)\n"
                                        "• Execute full test suite for comprehensive comparison\n"
-                                       "• View detailed benchmark reports with performance analysis\n\n"
+                                       "• View detailed benchmark reports with performance analysis\n"
+                                       "• Get AI-powered configuration recommendations\n\n"
                                        "Click 'Run Full Test Suite' to start!")
         self.results_text.config(state=tk.DISABLED)
 
@@ -264,7 +265,7 @@ class SimpleVTBProfiler:
                 "OLAP": self.benchmark_runner.run_olap_test,
                 "IoT": self.benchmark_runner.run_iot_test,
                 "Mixed": self.benchmark_runner.run_mixed_test,
-                "TPC-C": self.benchmark_runner.run_tpcc_test  # НОВЫЙ МЕТОД
+                "TPC-C": self.benchmark_runner.run_tpcc_test
             }
 
             method = test_methods.get(test_type)
@@ -272,7 +273,11 @@ class SimpleVTBProfiler:
                 self.benchmark_status_var.set(f"Error: Unknown test type {test_type}")
                 return
 
-            results = method(profile_name, duration=25)
+            # Set appropriate duration for each test type
+            if test_type == "TPC-C":
+                results = method(profile_name, duration=120)  # 2 minutes for TPC-C
+            else:
+                results = method(profile_name, duration=25)   # 25 seconds for others
 
             if 'error' in results:
                 self.benchmark_status_var.set(f"Error: {results['error']}")
@@ -292,12 +297,20 @@ class SimpleVTBProfiler:
                 result_text += f"• Clients: {results.get('clients', 0)}\n\n"
 
                 # Add performance analysis
-                if tps > 1000:
-                    result_text += "📈 EXCELLENT PERFORMANCE - System handles high transactional load well\n"
-                elif tps > 500:
-                    result_text += "📊 GOOD PERFORMANCE - Solid transactional throughput\n"
+                if test_type == "TPC-C":
+                    if tps > 100:
+                        result_text += "📈 EXCELLENT PERFORMANCE - System handles realistic OLTP load well\n"
+                    elif tps > 50:
+                        result_text += "📊 GOOD PERFORMANCE - Solid TPC-C throughput\n"
+                    else:
+                        result_text += "⚠️  MODERATE PERFORMANCE - Consider tuning configuration\n"
                 else:
-                    result_text += "⚠️  MODERATE PERFORMANCE - Consider tuning configuration\n"
+                    if tps > 1000:
+                        result_text += "📈 EXCELLENT PERFORMANCE - System handles high transactional load well\n"
+                    elif tps > 500:
+                        result_text += "📊 GOOD PERFORMANCE - Solid transactional throughput\n"
+                    else:
+                        result_text += "⚠️  MODERATE PERFORMANCE - Consider tuning configuration\n"
 
                 self._update_results_text(result_text)
 
@@ -313,7 +326,8 @@ class SimpleVTBProfiler:
                 ("Classic OLTP", "OLTP"),
                 ("Heavy OLAP", "OLAP"),
                 ("IoT / Ingestion", "IoT"),
-                ("Mixed / HTAP", "Mixed")
+                ("Mixed / HTAP", "Mixed"),
+                ("TPC-C Standard", "TPC-C")
             ]
 
             total_tests = len(test_sequence)
@@ -323,22 +337,30 @@ class SimpleVTBProfiler:
                 self.benchmark_status_var.set(f"Running test {current_test}/{total_tests}: {test_type}")
                 self.progress_var.set(f"Progress: {current_test}/{total_tests} - {profile}")
 
-                # Run the benchmark
+                # Run the benchmark with appropriate duration
                 test_methods = {
                     "OLTP": self.benchmark_runner.run_oltp_test,
                     "OLAP": self.benchmark_runner.run_olap_test,
                     "IoT": self.benchmark_runner.run_iot_test,
-                    "Mixed": self.benchmark_runner.run_mixed_test
+                    "Mixed": self.benchmark_runner.run_mixed_test,
+                    "TPC-C": self.benchmark_runner.run_tpcc_test
                 }
 
                 method = test_methods.get(test_type)
                 if method:
-                    method(profile, duration=20)
+                    if test_type == "TPC-C":
+                        method(profile, duration=120)  # 2 minutes for TPC-C
+                    else:
+                        method(profile, duration=20)   # 20 seconds for others
 
                 # Show progress
                 progress_text = f"🏃‍♂️ Test Suite Progress: {current_test}/{total_tests} completed\n"
                 progress_text += f"Current: {test_type} - {profile}\n"
-                progress_text += f"Next: {test_sequence[i+1][1] if i+1 < total_tests else 'COMPLETION'}\n"
+                if i + 1 < total_tests:
+                    progress_text += f"Next: {test_sequence[i+1][1]} - {test_sequence[i+1][0]}\n"
+                else:
+                    progress_text += "Next: COMPLETION\n"
+
                 self._update_results_text(progress_text)
 
                 # Wait between tests (except after the last one)
