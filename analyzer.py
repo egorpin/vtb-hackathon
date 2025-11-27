@@ -9,10 +9,8 @@ class ProfileAnalyzer:
         d_fetched = max(curr["tup_fetched"] - prev["tup_fetched"], 0)
 
         # 2. Расчет DB Time (Load)
-        # Если есть данные из pg_stat_statements (db_time_accumulated), используем их
         d_db_time_stats = max(curr.get("db_time_accumulated", 0) - prev.get("db_time_accumulated", 0), 0)
 
-        # Fallback: ASH
         # Fallback: ASH
         avg_active_sessions = (prev["active_sessions"] + curr["active_sessions"]) / 2
 
@@ -21,7 +19,7 @@ class ProfileAnalyzer:
         else:
             db_time_rate = avg_active_sessions
 
-        # 3. TPS
+        # 3. Расчет TPS
         tps = d_commits / duration
 
         # 4. Tx Cost
@@ -36,18 +34,16 @@ class ProfileAnalyzer:
 
         # Waits
         io_waits = curr["waits"].get("IO", 0)
+        cpu_waits = curr["waits"].get("CPU", 0)
 
         metrics = {
             "TPS": round(tps, 2),
             "Active Sessions (ASH)": round(db_time_rate, 2),
             "Tx Cost (s)": round(tx_cost, 4),
-            "Active Sessions (ASH)": round(db_time_rate, 2),
-            "Tx Cost (s)": round(tx_cost, 4),
             "Max Latency (s)": round(curr["max_duration"], 2),
             "IO Waits": io_waits,
-            "Read/Write Ratio": round(read_write_ratio, 2),
-            "Inserted/sec": round(inserts_per_sec, 2),
-            "Fetched/sec": round(fetches_per_sec, 2)
+            "CPU Waits": cpu_waits,
+            "Read/Write Ratio": round(read_write_ratio, 2)
         }
 
         # === ЛОГИКА ОПРЕДЕЛЕНИЯ ПРОФИЛЯ (ИСПРАВЛЕННАЯ) ===
