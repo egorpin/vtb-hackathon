@@ -17,3 +17,5 @@ python testing/run_benchmarks.py
 
 # Просмотр результатов тестов в БД
 docker exec -it vtb_postgres psql -U user -d mydb -c "SELECT * FROM benchmark_results ORDER BY timestamp DESC LIMIT 10;"
+
+#ya
