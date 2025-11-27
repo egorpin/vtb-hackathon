@@ -28,9 +28,10 @@ class ProfileAnalyzer:
         else:
             tx_cost = 0.0
 
-        # Коэффициент чтения/записи (Read/Write Ratio)
-        rw_ratio = d_fetched / d_writes if d_writes > 0 else 9999.0
-        # Коэффициент вставки/записи (Insert/Write Ratio)
+        rw_ratio = d_fetched / d_writes if d_writes > 0 else 0.0
+        if d_writes == 0 and d_fetched > 0:
+            rw_ratio = 9999.0
+
         insert_ratio = d_inserted / d_writes if d_writes > 0 else 0.0
 
         io_waits = curr["waits"].get("IO", 0)
@@ -55,13 +56,10 @@ class ProfileAnalyzer:
             return "IDLE", "High", metrics
 
         # ----------------------------------------------------
-        # 2. WRITE-INTENSIVE LOADS (Bulk Load, IoT)
+        # 2. WRITE-INTENSIVE LOADS (IoT)
         # ----------------------------------------------------
-        # Bulk Load: Почти 100% вставки, большой объем записей
-        if insert_ratio >= 0.95 and d_writes > 500:
-            return "Bulk Load", "High", metrics
 
-        # IoT / Ingestion: Высокий процент вставки (80%+), но, как правило, мелкие транзакции
+        # IoT / Ingestion: Высокий insert_ratio (80%+) с меньшим объемом записи, либо высокая TPS
         if d_writes > 50 and insert_ratio > 0.8:
             return "IoT / Ingestion", "High", metrics
 
@@ -71,16 +69,15 @@ class ProfileAnalyzer:
 
         is_heavy_query = (tx_cost > 0.05) or (metrics["Max Latency (s)"] > 1.0)
 
-        # Web / Read-Only: Очень высокий коэффициент чтения, низкая стоимость транзакции (быстрые запросы)
+        # Web / Read-Only: Очень высокий коэффициент чтения (>100) И низкая стоимость транзакции (быстрые, кешированные запросы)
         if rw_ratio > 100 and tps > 10 and tx_cost < 0.015:
             return "Web / Read-Only", "High", metrics
 
-        # Общая категория OLAP: Высокий коэффициент чтения ИЛИ дорогие/долгие запросы
+        # Общая категория OLAP
         if (rw_ratio > 50) or (is_heavy_query and tps < 100):
-            # Проверка на IDLE в случае низкого TPS (для исключения ложных срабатываний)
             if tps < 5.0 and db_time_rate < 1.0:
                  return "IDLE", "Low", metrics
-            # Disk-Bound OLAP: Высокие задержки ввода/вывода (IO Waits)
+            # Disk-Bound OLAP: Высокие задержки ввода/вывода (IO Waits) относительно ASH
             if io_waits > avg_active_sessions * 0.3:
                 return "Disk-Bound OLAP", "High", metrics
             # Heavy OLAP: CPU/RAM-зависимый OLAP
@@ -90,19 +87,14 @@ class ProfileAnalyzer:
         # ----------------------------------------------------
         # 4. MIXED / OLTP LOADS
         # ----------------------------------------------------
-        # Mixed / HTAP: Смешанный профиль (около 30-65% вставок)
         if 0.30 <= insert_ratio <= 0.65:
             return "Mixed / HTAP", "Medium", metrics
 
         if insert_ratio < 0.30:
-            # TPC-C OLTP: Более сложные/долгие OLTP-транзакции (высокая tx_cost)
-            if tx_cost > 0.012:
-                return "TPC-C OLTP", "Medium", metrics
-            # Classic OLTP: Быстрые, короткие транзакции
-            else:
-                return "Classic OLTP", "High", metrics
+            # Classic OLTP: Быстрые или сложные, но с низким insert_ratio
+            return "Classic OLTP", "High", metrics
 
         if tps > 5:
-            return "Mixed / HTAP", "Low", metrics # Запасной вариант для активной, но не классифицированной нагрузки
+            return "Mixed / HTAP", "Low", metrics
 
         return "IDLE", "Low", metrics
